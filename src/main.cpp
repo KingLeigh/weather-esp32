@@ -13,13 +13,6 @@
 
 uint8_t *framebuffer = NULL;
 
-// --- Hardcoded test data ---
-int current_temp = 72;
-int high_temp = 78;
-int low_temp = 65;
-WeatherIcon icon = SUNNY;
-int precip_pct[] = {0, 0, 10, 20, 45, 60, 40, 20, 10, 5, 0, 0};
-
 #define SLEEP_MINUTES 1
 
 void setup()
@@ -36,9 +29,19 @@ void setup()
 
     epd_init();
 
+    // --- Random test data ---
+    int current_temp = 50 + (int)(esp_random() % 50);       // 50-99
+    int high_temp = current_temp + (int)(esp_random() % 15); // current + 0-14
+    int low_temp = current_temp - (int)(esp_random() % 15);  // current - 0-14
+    WeatherIcon icon = (WeatherIcon)(esp_random() % 5);
+    int precip_pct[12];
+    for (int i = 0; i < 12; i++) {
+        precip_pct[i] = (int)(esp_random() % 101);          // 0-100
+    }
+
     // --- Current temperature (large font, top-left) ---
     char temp_str[8];
-    snprintf(temp_str, sizeof(temp_str), "%d\xC2\xB0", current_temp); // UTF-8 degree sign
+    snprintf(temp_str, sizeof(temp_str), "%d\xC2\xB0", current_temp);
     int32_t cx = 50, cy = 130;
     writeln((GFXfont *)&FiraSansLarge, temp_str, &cx, &cy, framebuffer);
 
@@ -59,11 +62,10 @@ void setup()
     // --- Divider line ---
     epd_draw_hline(40, 265, 880, 0x80, framebuffer);
 
-    // --- Precipitation chart ---
-    draw_precip_chart(40, 280, 880, 200, precip_pct, 12, framebuffer);
+    // --- Precipitation chart (half width) ---
+    draw_precip_chart(40, 280, 440, 200, precip_pct, 12, framebuffer);
 
     // --- Last updated (small font, bottom) ---
-    // Random seconds value so each wake cycle shows a visible change
     int rand_sec = esp_random() % 60;
     char updated_str[40];
     snprintf(updated_str, sizeof(updated_str), "Last updated: 2:30:%02d PM", rand_sec);
@@ -78,18 +80,17 @@ void setup()
 
     Serial.println("Weather display updated");
 
-    // Free framebuffer before sleep
+#if 0 // Enable for deployment — deep sleep between refreshes
     free(framebuffer);
     framebuffer = NULL;
-
-    // Enter deep sleep
     Serial.printf("Sleeping for %d minute(s)...\n", SLEEP_MINUTES);
     Serial.flush();
     esp_sleep_enable_timer_wakeup((uint64_t)SLEEP_MINUTES * 60 * 1000000ULL);
     esp_deep_sleep_start();
+#endif
 }
 
 void loop()
 {
-    // Never reached — deep sleep restarts from setup()
+    // Nothing to do — e-paper retains image without power
 }
