@@ -60,8 +60,10 @@ static void draw_precip_chart(int32_t x, int32_t y, int32_t w, int32_t h,
         epd_draw_line(px[i], py[i] + 1, px[i + 1], py[i + 1] + 1, 0x00, fb);
     }
 
-    // Hour labels along x-axis
-    for (int i = 0; i < count; i++) {
+    // Hour labels along x-axis (first, middle, last only)
+    int label_indices[] = {0, count / 2, count - 1};
+    for (int j = 0; j < 3; j++) {
+        int i = label_indices[j];
         char label[4];
         int hour = (12 + i) % 12;
         if (hour == 0) hour = 12;

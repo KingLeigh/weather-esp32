@@ -38,6 +38,8 @@ void setup()
     for (int i = 0; i < 12; i++) {
         precip_pct[i] = (int)(esp_random() % 101);          // 0-100
     }
+    int uv_current = (int)(esp_random() % 12);               // 0-11
+    int uv_high = uv_current + (int)(esp_random() % (12 - uv_current)); // current-11
 
     // --- Current temperature (large font, top-left) ---
     char temp_str[8];
@@ -65,11 +67,30 @@ void setup()
     // --- Precipitation chart (half width) ---
     draw_precip_chart(40, 280, 440, 200, precip_pct, 12, framebuffer);
 
-    // --- Last updated (small font, bottom) ---
+    // --- UV Index (right half of lower section) ---
+    draw_sun_small(570, 310, framebuffer);
+    int32_t uvlx = 600, uvly = 320;
+    writeln((GFXfont *)&FiraSans, "UV Index", &uvlx, &uvly, framebuffer);
+
+    char uv_now_str[4], uv_hi_str[4];
+    snprintf(uv_now_str, sizeof(uv_now_str), "%d", uv_current);
+    snprintf(uv_hi_str, sizeof(uv_hi_str), "%d", uv_high);
+
+    int32_t unx = 540, uny = 375;
+    writeln((GFXfont *)&FiraSans, "Now", &unx, &uny, framebuffer);
+    int32_t unvx = 610, unvy = 375;
+    writeln((GFXfont *)&FiraSansMedium, uv_now_str, &unvx, &unvy, framebuffer);
+
+    int32_t uhx = 540, uhy = 435;
+    writeln((GFXfont *)&FiraSans, "High", &uhx, &uhy, framebuffer);
+    int32_t uhvx = 610, uhvy = 435;
+    writeln((GFXfont *)&FiraSansMedium, uv_hi_str, &uhvx, &uhvy, framebuffer);
+
+    // --- Timestamp (lower-right corner, subtle gray) ---
     int rand_sec = esp_random() % 60;
-    char updated_str[40];
-    snprintf(updated_str, sizeof(updated_str), "Last updated: 2:30:%02d PM", rand_sec);
-    int32_t ux = 40, uy = 520;
+    char updated_str[16];
+    snprintf(updated_str, sizeof(updated_str), "2:30:%02d PM", rand_sec);
+    int32_t ux = EPD_WIDTH - 160, uy = EPD_HEIGHT - 15;
     writeln((GFXfont *)&FiraSans, updated_str, &ux, &uy, framebuffer);
 
     // Push to display

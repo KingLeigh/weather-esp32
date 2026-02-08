@@ -16,7 +16,9 @@ high_temp = 78
 low_temp = 65
 icon_type = "sunny"  # sunny, cloudy, partly_cloudy, rainy, snowy
 precip_pct = [0, 0, 10, 20, 45, 60, 40, 20, 10, 5, 0, 0]
-last_updated = "Last updated: 2:30:42 PM"
+uv_current = 6
+uv_high = 9
+last_updated = "2:30:42 PM"
 
 # --- Load fonts at sizes matching the generated headers ---
 # Large: 48pt at 150dpi. PIL uses 72dpi by default, so scale: 48 * 150/72 = 100
@@ -27,9 +29,12 @@ font_medium = ImageFont.truetype(FONT_TTF, 60)
 font_small = ImageFont.truetype(FONT_TTF, 28)
 
 
-def draw_sun(draw, cx, cy, radius):
+ICON_COLOR = 80  # soft gray (0=black, 255=white)
+
+
+def draw_sun(draw, cx, cy, radius, color=ICON_COLOR):
     """Sun: filled circle + 8 radiating lines."""
-    draw.ellipse([cx - radius, cy - radius, cx + radius, cy + radius], fill=0)
+    draw.ellipse([cx - radius, cy - radius, cx + radius, cy + radius], fill=color)
     inner = radius + 6
     outer = radius + 22
     for i in range(8):
@@ -38,62 +43,59 @@ def draw_sun(draw, cx, cy, radius):
         y0 = cy + int(inner * math.sin(angle))
         x1 = cx + int(outer * math.cos(angle))
         y1 = cy + int(outer * math.sin(angle))
-        draw.line([(x0, y0), (x1, y1)], fill=0, width=3)
+        draw.line([(x0, y0), (x1, y1)], fill=color, width=3)
 
 
-def draw_cloud(draw, cx, cy, size):
+def draw_cloud(draw, cx, cy, size, color=ICON_COLOR):
     """Cloud: many overlapping circles for a puffy, cartoony look."""
-    s = size / 100.0  # scale factor
+    s = size / 100.0
 
-    # Flat bottom row of circles
     for offset_x, r in [(-28, 18), (-10, 20), (10, 20), (28, 18)]:
         rx = cx + int(offset_x * s)
         ry = cy + int(8 * s)
         rr = int(r * s)
-        draw.ellipse([rx - rr, ry - rr, rx + rr, ry + rr], fill=0)
+        draw.ellipse([rx - rr, ry - rr, rx + rr, ry + rr], fill=color)
 
-    # Middle bumps
     for offset_x, offset_y, r in [(-22, -8, 20), (0, -12, 24), (22, -6, 19)]:
         rx = cx + int(offset_x * s)
         ry = cy + int(offset_y * s)
         rr = int(r * s)
-        draw.ellipse([rx - rr, ry - rr, rx + rr, ry + rr], fill=0)
+        draw.ellipse([rx - rr, ry - rr, rx + rr, ry + rr], fill=color)
 
-    # Top puff
     rx = cx + int(-4 * s)
     ry = cy - int(26 * s)
     rr = int(20 * s)
-    draw.ellipse([rx - rr, ry - rr, rx + rr, ry + rr], fill=0)
+    draw.ellipse([rx - rr, ry - rr, rx + rr, ry + rr], fill=color)
 
 
-def draw_rain(draw, cx, cy, size):
+def draw_rain(draw, cx, cy, size, color=ICON_COLOR):
     """Cloud + angled rain lines."""
-    draw_cloud(draw, cx, cy - size * 15 // 100, size)
+    draw_cloud(draw, cx, cy - size * 15 // 100, size, color)
     drop_top = cy + size * 15 // 100
     drop_len = size * 18 // 100
     for i in range(5):
         dx = cx - size * 25 // 100 + i * size * 13 // 100
         y_off = (i % 2) * 8
-        draw.line([(dx, drop_top + y_off), (dx - 4, drop_top + drop_len + y_off)], fill=0, width=2)
+        draw.line([(dx, drop_top + y_off), (dx - 4, drop_top + drop_len + y_off)], fill=color, width=2)
 
 
-def draw_snow(draw, cx, cy, size):
+def draw_snow(draw, cx, cy, size, color=ICON_COLOR):
     """Cloud + snowflake dots."""
-    draw_cloud(draw, cx, cy - size * 15 // 100, size)
+    draw_cloud(draw, cx, cy - size * 15 // 100, size, color)
     snow_y1 = cy + size * 18 // 100
     snow_y2 = cy + size * 32 // 100
     for i in range(4):
         dx = cx - size * 22 // 100 + i * size * 15 // 100
-        draw.ellipse([dx - 3, snow_y1 - 3, dx + 3, snow_y1 + 3], fill=0)
+        draw.ellipse([dx - 3, snow_y1 - 3, dx + 3, snow_y1 + 3], fill=color)
     for i in range(3):
         dx = cx - size * 15 // 100 + i * size * 15 // 100
-        draw.ellipse([dx - 3, snow_y2 - 3, dx + 3, snow_y2 + 3], fill=0)
+        draw.ellipse([dx - 3, snow_y2 - 3, dx + 3, snow_y2 + 3], fill=color)
 
 
-def draw_partly_cloudy(draw, cx, cy, size):
+def draw_partly_cloudy(draw, cx, cy, size, color=ICON_COLOR):
     """Sun peeking behind cloud."""
     sun_r = size * 18 // 100
-    draw_sun(draw, cx - size * 15 // 100, cy - size * 18 // 100, sun_r)
+    draw_sun(draw, cx - size * 15 // 100, cy - size * 18 // 100, sun_r, color)
 
     cloud_cx = cx + size * 8 // 100
     cloud_cy = cy + size * 8 // 100
@@ -113,7 +115,7 @@ def draw_partly_cloudy(draw, cx, cy, size):
     draw.ellipse([cloud_cx + size * 13 // 100 - r3 - 3, cloud_cy - r3 // 4 - r3 - 3,
                    cloud_cx + size * 13 // 100 + r3 + 3, cloud_cy - r3 // 4 + r3 + 3], fill=255)
 
-    draw_cloud(draw, cloud_cx, cloud_cy, size * 85 // 100)
+    draw_cloud(draw, cloud_cx, cloud_cy, size * 85 // 100, color)
 
 
 def draw_weather_icon(draw, icon, cx, cy, size):
@@ -162,8 +164,8 @@ def draw_precip_chart(draw, x, y, w, h, data, count):
     # Draw the line
     draw.line(points, fill=0, width=2)
 
-    # Hour labels along x-axis
-    for i in range(count):
+    # Hour labels along x-axis (first, middle, last only)
+    for i in [0, count // 2, count - 1]:
         hour = (12 + i) % 12
         if hour == 0:
             hour = 12
@@ -172,6 +174,33 @@ def draw_precip_chart(draw, x, y, w, h, data, count):
         bbox = draw.textbbox((0, 0), label, font=font_small)
         lw = bbox[2] - bbox[0]
         draw.text((lx - lw // 2, chart_bottom + 4), label, fill=0, font=font_small)
+
+
+def draw_uv_index(draw, x, y, uv_now, uv_hi):
+    """Draw UV index panel with small sun icon and current/high values."""
+    # Small sun icon
+    sun_cx = x + 30
+    sun_cy = y + 30
+    sun_r = 14
+    draw.ellipse([sun_cx - sun_r, sun_cy - sun_r, sun_cx + sun_r, sun_cy + sun_r], fill=0)
+    for i in range(8):
+        angle = i * math.pi / 4.0
+        inner = sun_r + 4
+        outer = sun_r + 12
+        x0 = sun_cx + int(inner * math.cos(angle))
+        y0 = sun_cy + int(inner * math.sin(angle))
+        x1 = sun_cx + int(outer * math.cos(angle))
+        y1 = sun_cy + int(outer * math.sin(angle))
+        draw.line([(x0, y0), (x1, y1)], fill=0, width=2)
+
+    # "UV Index" label
+    draw.text((x + 60, y + 10), "UV Index", fill=0, font=font_small)
+
+    # Current and High values (small font for labels, medium for numbers)
+    draw.text((x, y + 75), "Now", fill=0, font=font_small)
+    draw.text((x + 70, y + 65), str(uv_now), fill=0, font=font_medium)
+    draw.text((x, y + 135), "High", fill=0, font=font_small)
+    draw.text((x + 70, y + 125), str(uv_hi), fill=0, font=font_medium)
 
 
 def main_weather():
@@ -200,8 +229,13 @@ def main_weather():
     # Precipitation chart (half width)
     draw_precip_chart(draw, 40, 280, 440, 200, precip_pct, 12)
 
-    # Last updated
-    draw.text((40, 505), last_updated, fill=0, font=font_small)
+    # UV Index (right half of lower section)
+    draw_uv_index(draw, 540, 280, uv_current, uv_high)
+
+    # Timestamp (lower-right corner, subtle)
+    bbox = draw.textbbox((0, 0), last_updated, font=font_small)
+    tw = bbox[2] - bbox[0]
+    draw.text((WIDTH - tw - 20, HEIGHT - 35), last_updated, fill=160, font=font_small)
 
     out_path = os.path.join(os.path.dirname(__file__), "preview.png")
     img.save(out_path)
