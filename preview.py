@@ -19,7 +19,7 @@ precip_pct = [0, 0, 10, 20, 45, 60, 40, 20, 10, 5, 0, 0]
 uv_current = 6
 uv_high = 9
 battery_percent = 73
-last_updated = "2:30:42 PM"
+last_updated = "14:30:42"
 
 # --- Load fonts at sizes matching the generated headers ---
 # Large: 48pt at 150dpi. PIL uses 72dpi by default, so scale: 48 * 150/72 = 100
@@ -135,14 +135,14 @@ def draw_weather_icon(draw, icon, cx, cy, size):
 
 def draw_precip_chart(draw, x, y, w, h, data, count):
     """Precipitation time series line chart, 0-100% y-axis."""
-    label_h = 30
+    label_h = 40  # More breathing room for labels
     title_h = 25
     chart_h = h - label_h - title_h
     chart_y = y + title_h
     chart_bottom = chart_y + chart_h
 
     # Title
-    draw.text((x, y), "Precipitation next 12h", fill=0, font=font_small)
+    draw.text((x, y), "12hr Rain", fill=0, font=font_small)
 
     # Y-axis labels and gridlines at 0%, 25%, 50%, 75%, 100%
     for pct in [0, 25, 50, 75, 100]:
@@ -174,18 +174,18 @@ def draw_precip_chart(draw, x, y, w, h, data, count):
         lx = x + int(i * step)
         bbox = draw.textbbox((0, 0), label, font=font_small)
         lw = bbox[2] - bbox[0]
-        draw.text((lx - lw // 2, chart_bottom + 4), label, fill=0, font=font_small)
+        draw.text((lx - lw // 2, chart_bottom + 8), label, fill=0, font=font_small)
 
 
 def draw_battery_icon(draw, x, y, percent):
-    """Draw a small battery icon with fill level. x, y = top-left corner."""
-    w, h = 20, 10
-    tip_w = 2
+    """Draw a battery icon with fill level. x, y = top-left corner."""
+    w, h = 40, 20
+    tip_w = 4
 
     # Battery body outline
     draw.rectangle([x, y, x + w, y + h], outline=160, fill=255)
     # Battery tip
-    draw.rectangle([x + w, y + 3, x + w + tip_w, y + h - 3], fill=160)
+    draw.rectangle([x + w, y + 6, x + w + tip_w, y + h - 6], fill=160)
 
     # Fill level (inside body)
     fill_w = int((w - 2) * percent / 100)
@@ -194,7 +194,7 @@ def draw_battery_icon(draw, x, y, percent):
 
 
 def draw_uv_index(draw, x, y, uv_now, uv_hi):
-    """Draw UV index panel with small sun icon and current/high values."""
+    """Draw UV index panel with small sun icon and horizontal meter."""
     # Small sun icon
     sun_cx = x + 30
     sun_cy = y + 30
@@ -213,11 +213,42 @@ def draw_uv_index(draw, x, y, uv_now, uv_hi):
     # "UV Index" label
     draw.text((x + 60, y + 10), "UV Index", fill=0, font=font_small)
 
-    # Current and High values (small font for labels, medium for numbers)
-    draw.text((x, y + 75), "Now", fill=0, font=font_small)
-    draw.text((x + 70, y + 65), str(uv_now), fill=0, font=font_medium)
-    draw.text((x, y + 135), "High", fill=0, font=font_small)
-    draw.text((x + 70, y + 125), str(uv_hi), fill=0, font=font_medium)
+    # Horizontal UV meter
+    meter_x = x + 20
+    meter_y = y + 80
+    meter_w = 340
+    meter_h = 30
+    uv_max = 11
+
+    # Outline
+    draw.rectangle([meter_x, meter_y, meter_x + meter_w, meter_y + meter_h], outline=160, fill=255)
+
+    # Black fill for current UV
+    fill_w_now = 0
+    if uv_now > 0:
+        fill_w_now = int(meter_w * uv_now / uv_max)
+        draw.rectangle([meter_x + 1, meter_y + 1, meter_x + fill_w_now, meter_y + meter_h - 1], fill=0)
+
+    # Gray fill for high UV (from current to high)
+    fill_w_hi = 0
+    if uv_hi > uv_now:
+        fill_w_hi = int(meter_w * uv_hi / uv_max)
+        draw.rectangle([meter_x + fill_w_now + 1, meter_y + 1, meter_x + fill_w_hi, meter_y + meter_h - 1], fill=128)
+    elif uv_hi > 0:
+        fill_w_hi = int(meter_w * uv_hi / uv_max)
+
+    # Numbers positioned at their points on the meter (below)
+    if uv_now > 0:
+        now_str = str(uv_now)
+        bbox = draw.textbbox((0, 0), now_str, font=font_small)
+        tw = bbox[2] - bbox[0]
+        draw.text((meter_x + fill_w_now - tw // 2, meter_y + meter_h + 15), now_str, fill=0, font=font_small)
+
+    if uv_hi > 0:
+        hi_str = str(uv_hi)
+        bbox = draw.textbbox((0, 0), hi_str, font=font_small)
+        tw = bbox[2] - bbox[0]
+        draw.text((meter_x + fill_w_hi - tw // 2, meter_y + meter_h + 15), hi_str, fill=128, font=font_small)
 
 
 def main_weather():
@@ -243,11 +274,11 @@ def main_weather():
     # Divider line
     draw.line([(40, 265), (920, 265)], fill=128, width=1)
 
-    # Precipitation chart (half width)
-    draw_precip_chart(draw, 40, 280, 440, 200, precip_pct, 12)
+    # Precipitation chart (half width, moved down for more room)
+    draw_precip_chart(draw, 40, 295, 440, 210, precip_pct, 12)
 
     # UV Index (right half of lower section)
-    draw_uv_index(draw, 540, 280, uv_current, uv_high)
+    draw_uv_index(draw, 540, 295, uv_current, uv_high)
 
     # Timestamp with battery icon (lower-right corner, subtle)
     bbox = draw.textbbox((0, 0), last_updated, font=font_small)
@@ -256,8 +287,8 @@ def main_weather():
     timestamp_y = HEIGHT - 35
 
     # Battery icon to the left of timestamp (centered vertically)
-    battery_x = timestamp_x - 30
-    battery_y = timestamp_y - 5
+    battery_x = timestamp_x - 55
+    battery_y = timestamp_y - 10
     draw_battery_icon(draw, battery_x, battery_y, battery_percent)
 
     draw.text((timestamp_x, timestamp_y), last_updated, fill=160, font=font_small)

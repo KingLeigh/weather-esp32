@@ -10,14 +10,14 @@
 // fb: framebuffer
 static void draw_precip_chart(int32_t x, int32_t y, int32_t w, int32_t h,
                                const int *data, int count, uint8_t *fb) {
-    const int32_t label_h = 30;
+    const int32_t label_h = 40;  // More breathing room for labels
     const int32_t title_h = 25;
     const int32_t chart_h = h - label_h - title_h;
     const int32_t chart_y = y + title_h;
     const int32_t chart_bottom = chart_y + chart_h;
 
     // Title
-    const char *title = "Precipitation next 12h";
+    const char *title = "12hr Rain";
     int32_t tx = x;
     int32_t ty = y + 20;
     writeln((GFXfont *)&FiraSans, title, &tx, &ty, fb);
@@ -70,7 +70,7 @@ static void draw_precip_chart(int32_t x, int32_t y, int32_t w, int32_t h,
         snprintf(label, sizeof(label), "%d", hour);
 
         int32_t lx = px[i] - 5;
-        int32_t ly = chart_bottom + 22;
+        int32_t ly = chart_bottom + 28;  // More breathing room (was +22)
         writeln((GFXfont *)&FiraSans, label, &lx, &ly, fb);
     }
 }

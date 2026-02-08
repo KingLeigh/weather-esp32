@@ -18,14 +18,14 @@ uint32_t vref = 1100;  // ADC reference voltage
 
 #define SLEEP_MINUTES 1
 
-// Draw small battery icon with fill level
+// Draw battery icon with fill level
 static void draw_battery_icon(int32_t x, int32_t y, int percent, uint8_t *fb) {
-    int32_t w = 20, h = 10, tip_w = 2;
+    int32_t w = 40, h = 20, tip_w = 4;
 
     // Battery body outline
     epd_draw_rect(x, y, w, h, 0xA0, fb);
     // Battery tip
-    epd_fill_rect(x + w, y + 3, tip_w, h - 6, 0xA0, fb);
+    epd_fill_rect(x + w, y + 6, tip_w, h - 12, 0xA0, fb);
 
     // Fill level
     int32_t fill_w = (w - 2) * percent / 100;
@@ -104,36 +104,67 @@ void setup()
     // --- Divider line ---
     epd_draw_hline(40, 265, 880, 0x80, framebuffer);
 
-    // --- Precipitation chart (half width) ---
-    draw_precip_chart(40, 280, 440, 200, precip_pct, 12, framebuffer);
+    // --- Precipitation chart (half width, moved down for more room) ---
+    draw_precip_chart(40, 295, 440, 210, precip_pct, 12, framebuffer);
 
     // --- UV Index (right half of lower section) ---
-    draw_sun_small(570, 310, framebuffer);
-    int32_t uvlx = 600, uvly = 320;
+    draw_sun_small(570, 325, framebuffer);
+    int32_t uvlx = 600, uvly = 335;
     writeln((GFXfont *)&FiraSans, "UV Index", &uvlx, &uvly, framebuffer);
 
+    // Horizontal UV meter
+    int32_t meter_x = 560;
+    int32_t meter_y = 375;
+    int32_t meter_w = 340;
+    int32_t meter_h = 30;
+    int32_t uv_max = 11;
+
+    // Outline
+    epd_draw_rect(meter_x, meter_y, meter_w, meter_h, 0xA0, framebuffer);
+
+    // Black fill for current UV
+    int32_t fill_w_now = 0;
+    if (uv_current > 0) {
+        fill_w_now = meter_w * uv_current / uv_max;
+        epd_fill_rect(meter_x + 1, meter_y + 1, fill_w_now - 1, meter_h - 2, 0x00, framebuffer);
+    }
+
+    // Gray fill for high UV (from current to high)
+    int32_t fill_w_hi = 0;
+    if (uv_high > uv_current) {
+        fill_w_hi = meter_w * uv_high / uv_max;
+        epd_fill_rect(meter_x + fill_w_now + 1, meter_y + 1, fill_w_hi - fill_w_now - 1, meter_h - 2, 0x80, framebuffer);
+    } else if (uv_high > 0) {
+        fill_w_hi = meter_w * uv_high / uv_max;
+    }
+
+    // Numbers positioned at their points on the meter (below)
     char uv_now_str[4], uv_hi_str[4];
     snprintf(uv_now_str, sizeof(uv_now_str), "%d", uv_current);
     snprintf(uv_hi_str, sizeof(uv_hi_str), "%d", uv_high);
 
-    int32_t unx = 540, uny = 375;
-    writeln((GFXfont *)&FiraSans, "Now", &unx, &uny, framebuffer);
-    int32_t unvx = 610, unvy = 375;
-    writeln((GFXfont *)&FiraSansMedium, uv_now_str, &unvx, &unvy, framebuffer);
+    if (uv_current > 0) {
+        int32_t nx = meter_x + fill_w_now - 8;  // Approximate centering
+        int32_t ny = meter_y + meter_h + 40;
+        writeln((GFXfont *)&FiraSans, uv_now_str, &nx, &ny, framebuffer);
+    }
 
-    int32_t uhx = 540, uhy = 435;
-    writeln((GFXfont *)&FiraSans, "High", &uhx, &uhy, framebuffer);
-    int32_t uhvx = 610, uhvy = 435;
-    writeln((GFXfont *)&FiraSansMedium, uv_hi_str, &uhvx, &uhvy, framebuffer);
+    if (uv_high > 0) {
+        int32_t hx = meter_x + fill_w_hi - 8;  // Approximate centering
+        int32_t hy = meter_y + meter_h + 40;
+        writeln((GFXfont *)&FiraSans, uv_hi_str, &hx, &hy, framebuffer);
+    }
 
-    // --- Timestamp with battery icon (lower-right corner, subtle gray) ---
-    int rand_sec = esp_random() % 60;
+    // --- Timestamp with battery icon (lower-right corner, 24hr format) ---
+    int rand_hour = 14 + (int)(esp_random() % 10);  // 14-23
+    int rand_min = (int)(esp_random() % 60);
+    int rand_sec = (int)(esp_random() % 60);
     char updated_str[16];
-    snprintf(updated_str, sizeof(updated_str), "2:30:%02d PM", rand_sec);
-    int32_t ux = EPD_WIDTH - 160, uy = EPD_HEIGHT - 15;
+    snprintf(updated_str, sizeof(updated_str), "%02d:%02d:%02d", rand_hour, rand_min, rand_sec);
+    int32_t ux = EPD_WIDTH - 170, uy = EPD_HEIGHT - 15;
 
     // Battery icon to the left of timestamp (centered vertically)
-    draw_battery_icon(ux - 30, uy - 15, battery_percent, framebuffer);
+    draw_battery_icon(ux - 55, uy - 20, battery_percent, framebuffer);
 
     writeln((GFXfont *)&FiraSans, updated_str, &ux, &uy, framebuffer);
 
