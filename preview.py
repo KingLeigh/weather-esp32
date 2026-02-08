@@ -18,6 +18,7 @@ icon_type = "sunny"  # sunny, cloudy, partly_cloudy, rainy, snowy
 precip_pct = [0, 0, 10, 20, 45, 60, 40, 20, 10, 5, 0, 0]
 uv_current = 6
 uv_high = 9
+battery_percent = 73
 last_updated = "2:30:42 PM"
 
 # --- Load fonts at sizes matching the generated headers ---
@@ -176,6 +177,22 @@ def draw_precip_chart(draw, x, y, w, h, data, count):
         draw.text((lx - lw // 2, chart_bottom + 4), label, fill=0, font=font_small)
 
 
+def draw_battery_icon(draw, x, y, percent):
+    """Draw a small battery icon with fill level. x, y = top-left corner."""
+    w, h = 20, 10
+    tip_w = 2
+
+    # Battery body outline
+    draw.rectangle([x, y, x + w, y + h], outline=160, fill=255)
+    # Battery tip
+    draw.rectangle([x + w, y + 3, x + w + tip_w, y + h - 3], fill=160)
+
+    # Fill level (inside body)
+    fill_w = int((w - 2) * percent / 100)
+    if fill_w > 0:
+        draw.rectangle([x + 1, y + 1, x + 1 + fill_w, y + h - 1], fill=80)
+
+
 def draw_uv_index(draw, x, y, uv_now, uv_hi):
     """Draw UV index panel with small sun icon and current/high values."""
     # Small sun icon
@@ -232,10 +249,18 @@ def main_weather():
     # UV Index (right half of lower section)
     draw_uv_index(draw, 540, 280, uv_current, uv_high)
 
-    # Timestamp (lower-right corner, subtle)
+    # Timestamp with battery icon (lower-right corner, subtle)
     bbox = draw.textbbox((0, 0), last_updated, font=font_small)
     tw = bbox[2] - bbox[0]
-    draw.text((WIDTH - tw - 20, HEIGHT - 35), last_updated, fill=160, font=font_small)
+    timestamp_x = WIDTH - tw - 20
+    timestamp_y = HEIGHT - 35
+
+    # Battery icon to the left of timestamp (centered vertically)
+    battery_x = timestamp_x - 30
+    battery_y = timestamp_y - 5
+    draw_battery_icon(draw, battery_x, battery_y, battery_percent)
+
+    draw.text((timestamp_x, timestamp_y), last_updated, fill=160, font=font_small)
 
     out_path = os.path.join(os.path.dirname(__file__), "preview.png")
     img.save(out_path)
