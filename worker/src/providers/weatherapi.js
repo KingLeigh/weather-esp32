@@ -102,6 +102,11 @@ export class WeatherAPIProvider extends WeatherProvider {
       return 'cloudy';
     }
 
+    // Fog/Mist
+    if ([1030, 1135, 1147].includes(code)) {
+      return 'fog';
+    }
+
     // Rain (light to heavy, including drizzle and showers)
     if ([1063, 1150, 1153, 1168, 1171, 1180, 1183, 1186, 1189, 1192, 1195, 1198, 1201, 1240, 1243, 1246].includes(code)) {
       return 'rainy';
@@ -114,12 +119,7 @@ export class WeatherAPIProvider extends WeatherProvider {
 
     // Thunderstorm
     if ([1087, 1273, 1276, 1279, 1282].includes(code)) {
-      return 'rainy'; // Use rainy icon for storms
-    }
-
-    // Fog/Mist
-    if ([1030, 1135, 1147].includes(code)) {
-      return 'cloudy';
+      return 'thunderstorm';
     }
 
     // Default to partly cloudy
