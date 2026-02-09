@@ -1,0 +1,20 @@
+name = "weather-esp32"
+main = "src/index.js"
+compatibility_date = "2024-01-01"
+
+# KV namespace for caching weather data
+kv_namespaces = [
+  { binding = "WEATHER_KV", id = "YOUR_KV_NAMESPACE_ID" }
+]
+
+# Environment variables (set these via `wrangler secret put`)
+# WEATHER_API_KEY - Your WeatherAPI.com API key
+# WEATHER_PROVIDER - Provider name (default: weatherapi)
+# WEATHER_LOCATION - Location to fetch weather for (default: Manhattan)
+
+[env.production]
+vars = { WEATHER_PROVIDER = "weatherapi", WEATHER_LOCATION = "Manhattan" }
+
+# Scheduled cron trigger - runs every 15 minutes
+[triggers]
+crons = ["*/15 * * * *"]
