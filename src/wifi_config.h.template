@@ -1,0 +1,24 @@
+/**
+ * WiFi Configuration Template
+ *
+ * Copy this file to wifi_config.h and fill in your credentials:
+ *   cp src/wifi_config.h.template src/wifi_config.h
+ *
+ * Then edit wifi_config.h with your actual WiFi SSID and password.
+ */
+
+#pragma once
+
+// WiFi credentials
+#define WIFI_SSID "YOUR_WIFI_SSID"
+#define WIFI_PASSWORD "YOUR_WIFI_PASSWORD"
+
+// Weather API endpoint
+#define WEATHER_API_URL "https://weather-esp32.leigh-herbert.workers.dev/weather.json"
+
+// Connection timeout (milliseconds)
+#define WIFI_TIMEOUT_MS 20000
+
+// How often to fetch weather data (milliseconds)
+// 15 minutes = 900000 ms
+#define WEATHER_UPDATE_INTERVAL_MS 900000

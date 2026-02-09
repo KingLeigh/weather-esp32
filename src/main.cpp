@@ -12,11 +12,12 @@
 #include "fonts/font_medium.h"
 #include "weather_icons.h"
 #include "precip_chart.h"
+#include "weather_fetch.h"
 
 uint8_t *framebuffer = NULL;
 uint32_t vref = 1100;  // ADC reference voltage
 
-#define SLEEP_MINUTES 1
+#define UPDATE_INTERVAL_SECONDS 60  // Update every 60 seconds (for debugging)
 
 // Draw battery icon with fill level
 static void draw_battery_icon(int32_t x, int32_t y, int percent, uint8_t *fb) {
@@ -58,17 +59,30 @@ void setup()
 
     epd_init();
 
-    // --- Random test data ---
-    int current_temp = 50 + (int)(esp_random() % 50);       // 50-99
-    int high_temp = current_temp + (int)(esp_random() % 15); // current + 0-14
-    int low_temp = current_temp - (int)(esp_random() % 15);  // current - 0-14
-    WeatherIcon icon = (WeatherIcon)(esp_random() % 5);
-    int precip_pct[12];
-    for (int i = 0; i < 12; i++) {
-        precip_pct[i] = (int)(esp_random() % 101);          // 0-100
+    // --- Connect to WiFi and fetch weather data ---
+    WeatherData weather;
+    weather.valid = false;
+
+    if (connectWiFi()) {
+        if (fetchWeatherData(&weather)) {
+            Serial.println("Weather data fetched successfully!");
+        } else {
+            Serial.println("Failed to fetch weather data");
+        }
+        disconnectWiFi();  // Save power
+    } else {
+        Serial.println("WiFi connection failed");
     }
-    int uv_current = (int)(esp_random() % 12);               // 0-11
-    int uv_high = uv_current + (int)(esp_random() % (12 - uv_current)); // current-11
+
+    // Use fetched data, or show zeros if fetch failed (clear error indication)
+    int current_temp = weather.valid ? weather.temp_current : 0;
+    int high_temp = weather.valid ? weather.temp_high : 0;
+    int low_temp = weather.valid ? weather.temp_low : 0;
+    WeatherIcon icon = weather.valid ? weather.weather : CLOUDY;  // Cloudy = error indicator
+    int precip_zero[12] = {0,0,0,0,0,0,0,0,0,0,0,0};
+    int* precip_pct = weather.valid ? weather.precipitation : precip_zero;
+    int uv_current = weather.valid ? weather.uv_current : 0;
+    int uv_high = weather.valid ? weather.uv_high : 0;
 
     // Read battery voltage
     epd_poweron();
@@ -155,12 +169,20 @@ void setup()
         writeln((GFXfont *)&FiraSans, uv_hi_str, &hx, &hy, framebuffer);
     }
 
-    // --- Timestamp with battery icon (lower-right corner, 24hr format) ---
-    int rand_hour = 14 + (int)(esp_random() % 10);  // 14-23
-    int rand_min = (int)(esp_random() % 60);
-    int rand_sec = (int)(esp_random() % 60);
+    // --- Timestamp with battery icon (lower-right corner) ---
     char updated_str[16];
-    snprintf(updated_str, sizeof(updated_str), "%02d:%02d:%02d", rand_hour, rand_min, rand_sec);
+    if (weather.valid && strlen(weather.updated) > 0) {
+        // Parse ISO timestamp (e.g., "2026-02-09T16:00:15.723Z") and extract time
+        // Format: YYYY-MM-DDTHH:MM:SS
+        int hour, minute, second;
+        if (sscanf(weather.updated, "%*d-%*d-%*dT%d:%d:%d", &hour, &minute, &second) == 3) {
+            snprintf(updated_str, sizeof(updated_str), "%02d:%02d:%02d", hour, minute, second);
+        } else {
+            strcpy(updated_str, "??:??:??");
+        }
+    } else {
+        strcpy(updated_str, "OFFLINE");
+    }
     int32_t ux = EPD_WIDTH - 170, uy = EPD_HEIGHT - 15;
 
     // Battery icon to the left of timestamp (centered vertically)
@@ -175,18 +197,141 @@ void setup()
     epd_poweroff();
 
     Serial.println("Weather display updated");
-
-#if 0 // Enable for deployment — deep sleep between refreshes
-    free(framebuffer);
-    framebuffer = NULL;
-    Serial.printf("Sleeping for %d minute(s)...\n", SLEEP_MINUTES);
-    Serial.flush();
-    esp_sleep_enable_timer_wakeup((uint64_t)SLEEP_MINUTES * 60 * 1000000ULL);
-    esp_deep_sleep_start();
-#endif
+    Serial.printf("Next update in %d seconds...\n\n", UPDATE_INTERVAL_SECONDS);
 }
 
 void loop()
 {
-    // Nothing to do — e-paper retains image without power
+    // Wait before next update
+    delay(UPDATE_INTERVAL_SECONDS * 1000);
+
+    Serial.println("\n=== Starting new weather update ===");
+
+    // Fetch fresh weather data
+    WeatherData weather;
+    weather.valid = false;
+
+    if (connectWiFi()) {
+        if (fetchWeatherData(&weather)) {
+            Serial.println("Weather data fetched successfully!");
+        } else {
+            Serial.println("Failed to fetch weather data");
+        }
+        disconnectWiFi();
+    } else {
+        Serial.println("WiFi connection failed");
+    }
+
+    // Use fetched data, or show zeros if fetch failed
+    int current_temp = weather.valid ? weather.temp_current : 0;
+    int high_temp = weather.valid ? weather.temp_high : 0;
+    int low_temp = weather.valid ? weather.temp_low : 0;
+    WeatherIcon icon = weather.valid ? weather.weather : CLOUDY;
+    int precip_zero[12] = {0,0,0,0,0,0,0,0,0,0,0,0};
+    int* precip_pct = weather.valid ? weather.precipitation : precip_zero;
+    int uv_current = weather.valid ? weather.uv_current : 0;
+    int uv_high = weather.valid ? weather.uv_high : 0;
+
+    // Clear framebuffer
+    memset(framebuffer, 0xFF, EPD_WIDTH * EPD_HEIGHT / 2);
+
+    // Read battery voltage
+    epd_poweron();
+    delay(10);
+    uint16_t v = analogRead(BATT_PIN);
+    epd_poweroff();
+    float battery_voltage = ((float)v / 4095.0) * 2.0 * 3.3 * (vref / 1000.0);
+    if (battery_voltage > 4.2) battery_voltage = 4.2;
+    int battery_percent = (int)((battery_voltage - 3.0) / 1.2 * 100);
+    if (battery_percent < 0) battery_percent = 0;
+    if (battery_percent > 100) battery_percent = 100;
+
+    // Draw all display elements (same as in setup)
+    char temp_str[8];
+    snprintf(temp_str, sizeof(temp_str), "%d\xC2\xB0", current_temp);
+    int32_t cx = 50, cy = 130;
+    writeln((GFXfont *)&FiraSansLarge, temp_str, &cx, &cy, framebuffer);
+
+    draw_weather_icon(icon, 780, 110, 200, framebuffer);
+
+    char hi_str[16], lo_str[16];
+    snprintf(hi_str, sizeof(hi_str), "H: %d\xC2\xB0", high_temp);
+    snprintf(lo_str, sizeof(lo_str), "L: %d\xC2\xB0", low_temp);
+
+    int32_t hx = 50, hy = 215;
+    writeln((GFXfont *)&FiraSansMedium, hi_str, &hx, &hy, framebuffer);
+
+    int32_t lx = hx + 30, ly = 215;
+    writeln((GFXfont *)&FiraSansMedium, lo_str, &lx, &ly, framebuffer);
+
+    epd_draw_hline(40, 265, 880, 0x80, framebuffer);
+
+    draw_precip_chart(40, 295, 440, 210, precip_pct, 12, framebuffer);
+
+    draw_sun_small(570, 325, framebuffer);
+    int32_t uvlx = 600, uvly = 335;
+    writeln((GFXfont *)&FiraSans, "UV Index", &uvlx, &uvly, framebuffer);
+
+    int32_t meter_x = 560;
+    int32_t meter_y = 375;
+    int32_t meter_w = 340;
+    int32_t meter_h = 30;
+    int32_t uv_max = 11;
+
+    epd_draw_rect(meter_x, meter_y, meter_w, meter_h, 0xA0, framebuffer);
+
+    int32_t fill_w_now = 0;
+    if (uv_current > 0) {
+        fill_w_now = meter_w * uv_current / uv_max;
+        epd_fill_rect(meter_x + 1, meter_y + 1, fill_w_now - 1, meter_h - 2, 0x00, framebuffer);
+    }
+
+    int32_t fill_w_hi = 0;
+    if (uv_high > uv_current) {
+        fill_w_hi = meter_w * uv_high / uv_max;
+        epd_fill_rect(meter_x + fill_w_now + 1, meter_y + 1, fill_w_hi - fill_w_now - 1, meter_h - 2, 0x80, framebuffer);
+    } else if (uv_high > 0) {
+        fill_w_hi = meter_w * uv_high / uv_max;
+    }
+
+    char uv_now_str[4], uv_hi_str[4];
+    snprintf(uv_now_str, sizeof(uv_now_str), "%d", uv_current);
+    snprintf(uv_hi_str, sizeof(uv_hi_str), "%d", uv_high);
+
+    if (uv_current > 0) {
+        int32_t nx = meter_x + fill_w_now - 8;
+        int32_t ny = meter_y + meter_h + 40;
+        writeln((GFXfont *)&FiraSans, uv_now_str, &nx, &ny, framebuffer);
+    }
+
+    if (uv_high > 0) {
+        int32_t hx = meter_x + fill_w_hi - 8;
+        int32_t hy = meter_y + meter_h + 40;
+        writeln((GFXfont *)&FiraSans, uv_hi_str, &hx, &hy, framebuffer);
+    }
+
+    char updated_str[16];
+    if (weather.valid && strlen(weather.updated) > 0) {
+        int hour, minute, second;
+        if (sscanf(weather.updated, "%*d-%*d-%*dT%d:%d:%d", &hour, &minute, &second) == 3) {
+            snprintf(updated_str, sizeof(updated_str), "%02d:%02d:%02d", hour, minute, second);
+        } else {
+            strcpy(updated_str, "??:??:??");
+        }
+    } else {
+        strcpy(updated_str, "OFFLINE");
+    }
+    int32_t ux = EPD_WIDTH - 170, uy = EPD_HEIGHT - 15;
+
+    draw_battery_icon(ux - 55, uy - 20, battery_percent, framebuffer);
+
+    writeln((GFXfont *)&FiraSans, updated_str, &ux, &uy, framebuffer);
+
+    epd_poweron();
+    epd_clear();
+    epd_draw_grayscale_image(epd_full_screen(), framebuffer);
+    epd_poweroff();
+
+    Serial.println("Weather display updated");
+    Serial.printf("Next update in %d seconds...\n\n", UPDATE_INTERVAL_SECONDS);
 }
