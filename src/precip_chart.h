@@ -7,9 +7,10 @@
 // w, h: width and height of chart area
 // data: array of precipitation percentages (0-100)
 // count: number of data points
+// current_hour: current hour (0-23) for x-axis labels
 // fb: framebuffer
 static void draw_precip_chart(int32_t x, int32_t y, int32_t w, int32_t h,
-                               const int *data, int count, uint8_t *fb) {
+                               const int *data, int count, int current_hour, uint8_t *fb) {
     const int32_t label_h = 40;  // More breathing room for labels
     const int32_t title_h = 25;
     const int32_t chart_h = h - label_h - title_h;
@@ -65,12 +66,15 @@ static void draw_precip_chart(int32_t x, int32_t y, int32_t w, int32_t h,
     for (int j = 0; j < 3; j++) {
         int i = label_indices[j];
         char label[4];
-        int hour = (12 + i) % 12;
+        // Calculate actual hour: current hour + offset, wrapped to 24 hours
+        int hour_24 = (current_hour + i) % 24;
+        // Convert to 12-hour format
+        int hour = hour_24 % 12;
         if (hour == 0) hour = 12;
         snprintf(label, sizeof(label), "%d", hour);
 
         int32_t lx = px[i] - 5;
-        int32_t ly = chart_bottom + 28;  // More breathing room (was +22)
+        int32_t ly = chart_bottom + 35;  // Extra space to avoid chart line
         writeln((GFXfont *)&FiraSans, label, &lx, &ly, fb);
     }
 }

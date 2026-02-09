@@ -10,6 +10,13 @@
 #include "wifi_config.h"
 #include "weather_icons.h"
 
+// Error types for weather data fetch failures
+enum WeatherError {
+    ERROR_NONE = 0,
+    ERROR_NETWORK = 1,  // WiFi connection failed
+    ERROR_DATA = 2      // API/HTTP request failed
+};
+
 // Weather data structure
 struct WeatherData {
     int temp_current;
@@ -21,6 +28,7 @@ struct WeatherData {
     int uv_high;
     char updated[32];
     bool valid;
+    WeatherError error_type;
 };
 
 // Connect to WiFi
@@ -28,7 +36,19 @@ bool connectWiFi() {
     Serial.printf("Connecting to WiFi: %s\n", WIFI_SSID);
     Serial.printf("Password length: %d characters\n", strlen(WIFI_PASSWORD));
 
+    // Ensure clean WiFi state before connecting
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_OFF);
+    delay(100);
+
     WiFi.mode(WIFI_STA);
+
+    // Configure DNS servers before connecting (fixes DNS resolution issues)
+    // Primary: Google DNS, Secondary: Cloudflare DNS
+    IPAddress dns1(8, 8, 8, 8);      // Google DNS
+    IPAddress dns2(1, 1, 1, 1);      // Cloudflare DNS
+    WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE, dns1, dns2);
+
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
     unsigned long start = millis();
@@ -58,6 +78,9 @@ bool connectWiFi() {
 
     if (WiFi.status() == WL_CONNECTED) {
         Serial.printf("Connected! IP: %s\n", WiFi.localIP().toString().c_str());
+        Serial.printf("Gateway: %s\n", WiFi.gatewayIP().toString().c_str());
+        Serial.printf("DNS 1: %s\n", WiFi.dnsIP(0).toString().c_str());
+        Serial.printf("DNS 2: %s\n", WiFi.dnsIP(1).toString().c_str());
         Serial.printf("Signal: %d dBm\n", WiFi.RSSI());
         return true;
     } else {
@@ -81,69 +104,128 @@ WeatherIcon parseWeatherIcon(const char* weather_str) {
     return PARTLY_CLOUDY;  // default
 }
 
-// Fetch weather data from API
+// Fetch weather data from API with retry logic
 bool fetchWeatherData(WeatherData* data) {
     if (!data) return false;
 
     data->valid = false;
 
-    HTTPClient http;
-    http.begin(WEATHER_API_URL);
-    http.setTimeout(10000);  // 10 second timeout
+    const int MAX_RETRIES = 3;
+    const int RETRY_DELAY_MS = 2000;
 
-    Serial.printf("Fetching weather from: %s\n", WEATHER_API_URL);
+    for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        Serial.printf("Fetching weather (attempt %d/%d) from: %s\n", attempt, MAX_RETRIES, WEATHER_API_URL);
 
-    int httpCode = http.GET();
+        HTTPClient http;
+        http.begin(WEATHER_API_URL);
+        http.setTimeout(15000);  // 15 second timeout (increased from 10)
+        http.setConnectTimeout(10000);  // 10 second connection timeout
 
-    if (httpCode != HTTP_CODE_OK) {
-        Serial.printf("HTTP error: %d\n", httpCode);
+        int httpCode = http.GET();
+
+        if (httpCode == HTTP_CODE_OK) {
+            String payload = http.getString();
+            http.end();
+
+            Serial.printf("Received %d bytes\n", payload.length());
+
+            // Parse JSON
+            JsonDocument doc;
+            DeserializationError error = deserializeJson(doc, payload);
+
+            if (error) {
+                Serial.printf("JSON parse error: %s\n", error.c_str());
+                if (attempt < MAX_RETRIES) {
+                    Serial.printf("Retrying in %d ms...\n", RETRY_DELAY_MS);
+                    delay(RETRY_DELAY_MS);
+                    continue;
+                }
+                return false;
+            }
+
+            // Extract data
+            data->temp_current = doc["temperature"]["current"] | 0;
+            data->temp_high = doc["temperature"]["high"] | 0;
+            data->temp_low = doc["temperature"]["low"] | 0;
+
+            const char* weather_str = doc["weather"] | "partly_cloudy";
+            data->weather = parseWeatherIcon(weather_str);
+
+            // Precipitation array
+            JsonArray precip_array = doc["precipitation"];
+            for (int i = 0; i < 12; i++) {
+                data->precipitation[i] = (i < precip_array.size()) ? precip_array[i].as<int>() : 0;
+            }
+
+            data->uv_current = doc["uv"]["current"] | 0;
+            data->uv_high = doc["uv"]["high"] | 0;
+
+            const char* updated_str = doc["updated"] | "";
+            strncpy(data->updated, updated_str, sizeof(data->updated) - 1);
+            data->updated[sizeof(data->updated) - 1] = '\0';
+
+            data->valid = true;
+
+            Serial.println("Weather data parsed successfully:");
+            Serial.printf("  Temp: %d°F (H:%d L:%d)\n", data->temp_current, data->temp_high, data->temp_low);
+            Serial.printf("  Weather: %s\n", weather_str);
+            Serial.printf("  UV: %d (high: %d)\n", data->uv_current, data->uv_high);
+
+            return true;
+        }
+
+        // HTTP request failed - provide detailed diagnostics
+        Serial.println("========== HTTP REQUEST FAILED ==========");
+        Serial.printf("HTTP Code: %d\n", httpCode);
+
+        if (httpCode > 0) {
+            // Positive codes are HTTP status codes
+            Serial.printf("HTTP Status: %s\n", http.errorToString(httpCode).c_str());
+
+            // Try to get response body for debugging
+            String errorBody = http.getString();
+            if (errorBody.length() > 0 && errorBody.length() < 500) {
+                Serial.printf("Response body: %s\n", errorBody.c_str());
+            } else if (errorBody.length() > 0) {
+                Serial.printf("Response body (first 500 chars): %s...\n", errorBody.substring(0, 500).c_str());
+            }
+
+            // Common HTTP error explanations
+            if (httpCode == 404) {
+                Serial.println("ERROR: API endpoint not found (404)");
+            } else if (httpCode == 500 || httpCode == 502 || httpCode == 503) {
+                Serial.println("ERROR: Server error - Worker may be down or misconfigured");
+            } else if (httpCode == 403) {
+                Serial.println("ERROR: Access forbidden - check Worker routes/permissions");
+            } else if (httpCode == 429) {
+                Serial.println("ERROR: Rate limited");
+            }
+        } else {
+            // Negative codes are client errors
+            Serial.printf("Client Error: %s\n", http.errorToString(httpCode).c_str());
+
+            if (httpCode == -1) {
+                Serial.println("ERROR: Connection failed - DNS or network issue");
+            } else if (httpCode == -2) {
+                Serial.println("ERROR: Connection lost during request");
+            } else if (httpCode == -3) {
+                Serial.println("ERROR: HTTP header read timeout");
+            } else if (httpCode == -11) {
+                Serial.println("ERROR: Read timeout - server not responding");
+            }
+        }
+        Serial.println("=========================================");
+
         http.end();
-        return false;
+
+        if (attempt < MAX_RETRIES) {
+            Serial.printf("Retrying in %d ms...\n", RETRY_DELAY_MS);
+            delay(RETRY_DELAY_MS);
+        }
     }
 
-    String payload = http.getString();
-    http.end();
-
-    Serial.printf("Received %d bytes\n", payload.length());
-
-    // Parse JSON
-    JsonDocument doc;
-    DeserializationError error = deserializeJson(doc, payload);
-
-    if (error) {
-        Serial.printf("JSON parse error: %s\n", error.c_str());
-        return false;
-    }
-
-    // Extract data
-    data->temp_current = doc["temperature"]["current"] | 0;
-    data->temp_high = doc["temperature"]["high"] | 0;
-    data->temp_low = doc["temperature"]["low"] | 0;
-
-    const char* weather_str = doc["weather"] | "partly_cloudy";
-    data->weather = parseWeatherIcon(weather_str);
-
-    // Precipitation array
-    JsonArray precip_array = doc["precipitation"];
-    for (int i = 0; i < 12; i++) {
-        data->precipitation[i] = (i < precip_array.size()) ? precip_array[i].as<int>() : 0;
-    }
-
-    data->uv_current = doc["uv"]["current"] | 0;
-    data->uv_high = doc["uv"]["high"] | 0;
-
-    const char* updated_str = doc["updated"] | "";
-    strncpy(data->updated, updated_str, sizeof(data->updated) - 1);
-    data->updated[sizeof(data->updated) - 1] = '\0';
-
-    data->valid = true;
-
-    Serial.println("Weather data parsed successfully:");
-    Serial.printf("  Temp: %d°F (H:%d L:%d)\n", data->temp_current, data->temp_high, data->temp_low);
-    Serial.printf("  Weather: %s\n", weather_str);
-    Serial.printf("  UV: %d (high: %d)\n", data->uv_current, data->uv_high);
-
-    return true;
+    Serial.println("All retry attempts failed");
+    return false;
 }
 
 // Disconnect WiFi to save power

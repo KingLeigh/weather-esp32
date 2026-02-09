@@ -101,16 +101,20 @@ void setup()
     // --- Connect to WiFi and fetch weather data ---
     WeatherData weather;
     weather.valid = false;
+    weather.error_type = ERROR_NONE;
 
     if (connectWiFi()) {
         if (fetchWeatherData(&weather)) {
             Serial.println("Weather data fetched successfully!");
+            weather.error_type = ERROR_NONE;
         } else {
             Serial.println("Failed to fetch weather data");
+            weather.error_type = ERROR_DATA;
         }
         disconnectWiFi();  // Save power
     } else {
         Serial.println("WiFi connection failed");
+        weather.error_type = ERROR_NETWORK;
     }
 
     // Use fetched data, or show zeros if fetch failed (clear error indication)
@@ -122,6 +126,15 @@ void setup()
     int* precip_pct = weather.valid ? weather.precipitation : precip_zero;
     int uv_current = weather.valid ? weather.uv_current : 0;
     int uv_high = weather.valid ? weather.uv_high : 0;
+
+    // Parse current hour from timestamp for precipitation chart labels
+    int current_hour = 0;  // Default to midnight if parsing fails
+    if (weather.valid && strlen(weather.updated) > 0) {
+        int hour, minute, second;
+        if (sscanf(weather.updated, "%*d-%*d-%*dT%d:%d:%d", &hour, &minute, &second) == 3) {
+            current_hour = hour;
+        }
+    }
 
     // Read battery voltage
     epd_poweron();
@@ -158,7 +171,7 @@ void setup()
     epd_draw_hline(40, 265, 880, 0x80, framebuffer);
 
     // --- Precipitation chart (half width, moved down for more room) ---
-    draw_precip_chart(40, 295, 440, 210, precip_pct, 12, framebuffer);
+    draw_precip_chart(40, 295, 440, 210, precip_pct, 12, current_hour, framebuffer);
 
     // --- UV Index (right half of lower section) ---
     draw_sun_small(570, 325, framebuffer);
@@ -220,7 +233,14 @@ void setup()
             strcpy(updated_str, "??:??:??");
         }
     } else {
-        strcpy(updated_str, "OFFLINE");
+        // Show specific error message based on failure type
+        if (weather.error_type == ERROR_NETWORK) {
+            strcpy(updated_str, "NETWORK");
+        } else if (weather.error_type == ERROR_DATA) {
+            strcpy(updated_str, "DATA");
+        } else {
+            strcpy(updated_str, "OFFLINE");
+        }
     }
     int32_t ux = EPD_WIDTH - 170, uy = EPD_HEIGHT - 15;
 
@@ -253,16 +273,20 @@ void loop()
     // Fetch fresh weather data
     WeatherData weather;
     weather.valid = false;
+    weather.error_type = ERROR_NONE;
 
     if (connectWiFi()) {
         if (fetchWeatherData(&weather)) {
             Serial.println("Weather data fetched successfully!");
+            weather.error_type = ERROR_NONE;
         } else {
             Serial.println("Failed to fetch weather data");
+            weather.error_type = ERROR_DATA;
         }
         disconnectWiFi();
     } else {
         Serial.println("WiFi connection failed");
+        weather.error_type = ERROR_NETWORK;
     }
 
     // Use fetched data, or show zeros if fetch failed
@@ -274,6 +298,15 @@ void loop()
     int* precip_pct = weather.valid ? weather.precipitation : precip_zero;
     int uv_current = weather.valid ? weather.uv_current : 0;
     int uv_high = weather.valid ? weather.uv_high : 0;
+
+    // Parse current hour from timestamp for precipitation chart labels
+    int current_hour = 0;  // Default to midnight if parsing fails
+    if (weather.valid && strlen(weather.updated) > 0) {
+        int hour, minute, second;
+        if (sscanf(weather.updated, "%*d-%*d-%*dT%d:%d:%d", &hour, &minute, &second) == 3) {
+            current_hour = hour;
+        }
+    }
 
     // Read battery voltage
     epd_poweron();
@@ -320,7 +353,7 @@ void loop()
 
     epd_draw_hline(40, 265, 880, 0x80, framebuffer);
 
-    draw_precip_chart(40, 295, 440, 210, precip_pct, 12, framebuffer);
+    draw_precip_chart(40, 295, 440, 210, precip_pct, 12, current_hour, framebuffer);
 
     draw_sun_small(570, 325, framebuffer);
     int32_t uvlx = 600, uvly = 335;
@@ -373,7 +406,14 @@ void loop()
             strcpy(updated_str, "??:??:??");
         }
     } else {
-        strcpy(updated_str, "OFFLINE");
+        // Show specific error message based on failure type
+        if (weather.error_type == ERROR_NETWORK) {
+            strcpy(updated_str, "NETWORK");
+        } else if (weather.error_type == ERROR_DATA) {
+            strcpy(updated_str, "DATA");
+        } else {
+            strcpy(updated_str, "OFFLINE");
+        }
     }
     int32_t ux = EPD_WIDTH - 170, uy = EPD_HEIGHT - 15;
 
