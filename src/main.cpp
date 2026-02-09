@@ -24,6 +24,17 @@ WeatherData prev_weather;
 int prev_battery_percent = -1;
 int consecutive_failures = 0;  // Track how many updates failed in a row
 
+// Parse hour from ISO timestamp (e.g., "2025-01-15T14:30:00" -> 14)
+static int parse_hour_from_timestamp(const char* timestamp) {
+    if (!timestamp || strlen(timestamp) == 0) return 0;
+
+    int hour, minute, second;
+    if (sscanf(timestamp, "%*d-%*d-%*dT%d:%d:%d", &hour, &minute, &second) == 3) {
+        return hour;
+    }
+    return 0;  // Default to midnight if parsing fails
+}
+
 // Read battery percentage from ADC
 static int read_battery_percent() {
     epd_poweron();
@@ -266,13 +277,7 @@ void setup()
     int uv_high = weather.valid ? weather.uv_high : 0;
 
     // Parse current hour from timestamp for precipitation chart labels
-    int current_hour = 0;  // Default to midnight if parsing fails
-    if (weather.valid && strlen(weather.updated) > 0) {
-        int hour, minute, second;
-        if (sscanf(weather.updated, "%*d-%*d-%*dT%d:%d:%d", &hour, &minute, &second) == 3) {
-            current_hour = hour;
-        }
-    }
+    int current_hour = weather.valid ? parse_hour_from_timestamp(weather.updated) : 0;
 
     // Read battery and render display
     int battery_percent = read_battery_percent();
@@ -323,14 +328,8 @@ void loop()
     int uv_high = weather.valid ? weather.uv_high : prev_weather.uv_high;
 
     // Parse current hour from timestamp for precipitation chart labels
-    int current_hour = 0;  // Default to midnight if parsing fails
     const char* timestamp = weather.valid ? weather.updated : prev_weather.updated;
-    if (strlen(timestamp) > 0) {
-        int hour, minute, second;
-        if (sscanf(timestamp, "%*d-%*d-%*dT%d:%d:%d", &hour, &minute, &second) == 3) {
-            current_hour = hour;
-        }
-    }
+    int current_hour = parse_hour_from_timestamp(timestamp);
 
     // Read battery and check for changes
     int battery_percent = read_battery_percent();
