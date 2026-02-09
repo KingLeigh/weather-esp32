@@ -63,7 +63,22 @@ export class WeatherAPIProvider extends WeatherProvider {
         current: Math.round(current.uv),
         high: uvHigh
       },
-      updated: new Date().toISOString()
+      // Return Eastern Time formatted as YYYY-MM-DDTHH:MM:SS
+      updated: (() => {
+        const formatter = new Intl.DateTimeFormat('en-US', {
+          timeZone: 'America/New_York',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          hour12: false
+        });
+        const parts = formatter.formatToParts(new Date());
+        const get = (type) => parts.find(p => p.type === type)?.value || '00';
+        return `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}:${get('second')}`;
+      })()
     };
   }
 
