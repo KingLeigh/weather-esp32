@@ -22,6 +22,7 @@ uint32_t vref = 1100;  // ADC reference voltage
 // Track previous weather data to detect changes
 WeatherData prev_weather;
 int prev_battery_percent = -1;
+int consecutive_failures = 0;  // Track how many updates failed in a row
 
 // Draw battery icon with fill level
 static void draw_battery_icon(int32_t x, int32_t y, int percent, uint8_t *fb) {
@@ -107,14 +108,17 @@ void setup()
         if (fetchWeatherData(&weather)) {
             Serial.println("Weather data fetched successfully!");
             weather.error_type = ERROR_NONE;
+            consecutive_failures = 0;
         } else {
             Serial.println("Failed to fetch weather data");
             weather.error_type = ERROR_DATA;
+            consecutive_failures = 1;
         }
         disconnectWiFi();  // Save power
     } else {
         Serial.println("WiFi connection failed");
         weather.error_type = ERROR_NETWORK;
+        consecutive_failures = 1;
     }
 
     // Use fetched data, or show zeros if fetch failed (clear error indication)
@@ -223,26 +227,33 @@ void setup()
 
     // --- Timestamp with battery icon (lower-right corner) ---
     char updated_str[16];
-    if (weather.valid && strlen(weather.updated) > 0) {
-        // Parse ISO timestamp (e.g., "2026-02-09T16:00:15.723Z") and extract time
-        // Format: YYYY-MM-DDTHH:MM:SS
+    // Use current timestamp if valid, otherwise use previous timestamp
+    const char* timestamp_for_display = weather.valid ? weather.updated : prev_weather.updated;
+    if (strlen(timestamp_for_display) > 0) {
+        // Parse ISO timestamp and extract time
         int hour, minute, second;
-        if (sscanf(weather.updated, "%*d-%*d-%*dT%d:%d:%d", &hour, &minute, &second) == 3) {
+        if (sscanf(timestamp_for_display, "%*d-%*d-%*dT%d:%d:%d", &hour, &minute, &second) == 3) {
             snprintf(updated_str, sizeof(updated_str), "%02d:%02d:%02d", hour, minute, second);
         } else {
             strcpy(updated_str, "??:??:??");
         }
     } else {
-        // Show specific error message based on failure type
-        if (weather.error_type == ERROR_NETWORK) {
-            strcpy(updated_str, "NETWORK");
-        } else if (weather.error_type == ERROR_DATA) {
-            strcpy(updated_str, "DATA");
-        } else {
-            strcpy(updated_str, "OFFLINE");
-        }
+        // No timestamp available (first boot and failed)
+        strcpy(updated_str, "--:--:--");
     }
     int32_t ux = EPD_WIDTH - 170, uy = EPD_HEIGHT - 15;
+
+    // Failure indicator to the left of battery icon (if any failures)
+    if (consecutive_failures > 0) {
+        char failure_str[8];
+        if (consecutive_failures == 1) {
+            strcpy(failure_str, "?");
+        } else {
+            snprintf(failure_str, sizeof(failure_str), "%d?", consecutive_failures);
+        }
+        int32_t fx = ux - 100, fy = uy;
+        writeln((GFXfont *)&FiraSans, failure_str, &fx, &fy, framebuffer);
+    }
 
     // Battery icon to the left of timestamp (centered vertically)
     draw_battery_icon(ux - 55, uy - 20, battery_percent, framebuffer);
@@ -279,31 +290,35 @@ void loop()
         if (fetchWeatherData(&weather)) {
             Serial.println("Weather data fetched successfully!");
             weather.error_type = ERROR_NONE;
+            consecutive_failures = 0;  // Reset failure counter on success
         } else {
             Serial.println("Failed to fetch weather data");
             weather.error_type = ERROR_DATA;
+            consecutive_failures++;
         }
         disconnectWiFi();
     } else {
         Serial.println("WiFi connection failed");
         weather.error_type = ERROR_NETWORK;
+        consecutive_failures++;
     }
 
-    // Use fetched data, or show zeros if fetch failed
-    int current_temp = weather.valid ? weather.temp_current : 0;
-    int high_temp = weather.valid ? weather.temp_high : 0;
-    int low_temp = weather.valid ? weather.temp_low : 0;
-    WeatherIcon icon = weather.valid ? weather.weather : CLOUDY;
-    int precip_zero[12] = {0,0,0,0,0,0,0,0,0,0,0,0};
-    int* precip_pct = weather.valid ? weather.precipitation : precip_zero;
-    int uv_current = weather.valid ? weather.uv_current : 0;
-    int uv_high = weather.valid ? weather.uv_high : 0;
+    // Use fetched data if valid, otherwise keep showing previous data
+    int current_temp = weather.valid ? weather.temp_current : prev_weather.temp_current;
+    int high_temp = weather.valid ? weather.temp_high : prev_weather.temp_high;
+    int low_temp = weather.valid ? weather.temp_low : prev_weather.temp_low;
+    WeatherIcon icon = weather.valid ? weather.weather : prev_weather.weather;
+    int* precip_pct = weather.valid ? weather.precipitation : prev_weather.precipitation;
+    int uv_current = weather.valid ? weather.uv_current : prev_weather.uv_current;
+    int uv_high = weather.valid ? weather.uv_high : prev_weather.uv_high;
 
     // Parse current hour from timestamp for precipitation chart labels
+    // Use current data if valid, otherwise use previous data
     int current_hour = 0;  // Default to midnight if parsing fails
-    if (weather.valid && strlen(weather.updated) > 0) {
+    const char* timestamp_to_use = weather.valid ? weather.updated : prev_weather.updated;
+    if (strlen(timestamp_to_use) > 0) {
         int hour, minute, second;
-        if (sscanf(weather.updated, "%*d-%*d-%*dT%d:%d:%d", &hour, &minute, &second) == 3) {
+        if (sscanf(timestamp_to_use, "%*d-%*d-%*dT%d:%d:%d", &hour, &minute, &second) == 3) {
             current_hour = hour;
         }
     }

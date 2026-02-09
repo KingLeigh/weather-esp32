@@ -42,13 +42,6 @@ bool connectWiFi() {
     delay(100);
 
     WiFi.mode(WIFI_STA);
-
-    // Configure DNS servers before connecting (fixes DNS resolution issues)
-    // Primary: Google DNS, Secondary: Cloudflare DNS
-    IPAddress dns1(8, 8, 8, 8);      // Google DNS
-    IPAddress dns2(1, 1, 1, 1);      // Cloudflare DNS
-    WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE, dns1, dns2);
-
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
     unsigned long start = millis();
@@ -79,6 +72,19 @@ bool connectWiFi() {
     if (WiFi.status() == WL_CONNECTED) {
         Serial.printf("Connected! IP: %s\n", WiFi.localIP().toString().c_str());
         Serial.printf("Gateway: %s\n", WiFi.gatewayIP().toString().c_str());
+
+        // Set DNS servers AFTER connection (more reliable on ESP32-S3)
+        IPAddress dns1(8, 8, 8, 8);      // Google DNS
+        IPAddress dns2(1, 1, 1, 1);      // Cloudflare DNS
+
+        // Get current network config
+        IPAddress ip = WiFi.localIP();
+        IPAddress gateway = WiFi.gatewayIP();
+        IPAddress subnet = WiFi.subnetMask();
+
+        // Reconfigure with custom DNS
+        WiFi.config(ip, gateway, subnet, dns1, dns2);
+
         Serial.printf("DNS 1: %s\n", WiFi.dnsIP(0).toString().c_str());
         Serial.printf("DNS 2: %s\n", WiFi.dnsIP(1).toString().c_str());
         Serial.printf("Signal: %d dBm\n", WiFi.RSSI());
