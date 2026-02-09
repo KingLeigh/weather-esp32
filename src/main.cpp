@@ -213,13 +213,13 @@ void setup()
     snprintf(uv_now_str, sizeof(uv_now_str), "%d", uv_current);
     snprintf(uv_hi_str, sizeof(uv_hi_str), "%d", uv_high);
 
-    if (uv_current > 0) {
-        int32_t nx = meter_x + fill_w_now - 8;  // Approximate centering
-        int32_t ny = meter_y + meter_h + 40;
-        writeln((GFXfont *)&FiraSans, uv_now_str, &nx, &ny, framebuffer);
-    }
+    // Always show current UV (even if 0) at the left edge if no fill
+    int32_t nx = uv_current > 0 ? (meter_x + fill_w_now - 8) : (meter_x + 5);
+    int32_t ny = meter_y + meter_h + 40;
+    writeln((GFXfont *)&FiraSans, uv_now_str, &nx, &ny, framebuffer);
 
-    if (uv_high > 0) {
+    // Show high UV at its position on the meter
+    if (uv_high > 0 && uv_high != uv_current) {
         int32_t hx = meter_x + fill_w_hi - 8;  // Approximate centering
         int32_t hy = meter_y + meter_h + 40;
         writeln((GFXfont *)&FiraSans, uv_hi_str, &hx, &hy, framebuffer);
