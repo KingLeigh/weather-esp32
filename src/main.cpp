@@ -316,12 +316,11 @@ void loop()
     int uv_high = weather.valid ? weather.uv_high : prev_weather.uv_high;
 
     // Parse current hour from timestamp for precipitation chart labels
-    // Use current data if valid, otherwise use previous data
     int current_hour = 0;  // Default to midnight if parsing fails
-    const char* timestamp_to_use = weather.valid ? weather.updated : prev_weather.updated;
-    if (strlen(timestamp_to_use) > 0) {
+    const char* timestamp = weather.valid ? weather.updated : prev_weather.updated;
+    if (strlen(timestamp) > 0) {
         int hour, minute, second;
-        if (sscanf(timestamp_to_use, "%*d-%*d-%*dT%d:%d:%d", &hour, &minute, &second) == 3) {
+        if (sscanf(timestamp, "%*d-%*d-%*dT%d:%d:%d", &hour, &minute, &second) == 3) {
             current_hour = hour;
         }
     }
