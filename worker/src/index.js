@@ -25,6 +25,12 @@ export default {
         // No cached data yet, fetch fresh data
         try {
           const weatherData = await fetchWeatherData(env);
+
+          // Store in KV so next request uses cached data
+          await env.WEATHER_KV.put('current', JSON.stringify(weatherData), {
+            expirationTtl: 3600 // 1 hour
+          });
+
           return jsonResponse(weatherData);
         } catch (error) {
           return jsonResponse({ error: 'Failed to fetch weather data' }, 500);
