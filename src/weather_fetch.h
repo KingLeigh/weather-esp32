@@ -26,7 +26,6 @@ struct WeatherData {
 // Connect to WiFi
 bool connectWiFi() {
     Serial.printf("Connecting to WiFi: %s\n", WIFI_SSID);
-    Serial.printf("Password length: %d characters\n", strlen(WIFI_PASSWORD));
 
     // Ensure clean WiFi state before connecting
     WiFi.disconnect(true);
