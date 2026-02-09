@@ -3,25 +3,15 @@ main = "src/index.js"
 compatibility_date = "2024-01-01"
 
 # KV namespace for caching weather data
-# For local dev: wrangler will create a local KV automatically
-# For production: uncomment and add your KV namespace ID after running:
-#   wrangler kv:namespace create WEATHER_KV
-# kv_namespaces = [
-#   { binding = "WEATHER_KV", id = "YOUR_KV_NAMESPACE_ID" }
-# ]
-
 [[kv_namespaces]]
 binding = "WEATHER_KV"
-id = "local-kv-for-dev"
-preview_id = "local-kv-for-dev"
+id = "bd1e4ef949604fcc8a02eb116c755dbc"
 
-# Environment variables (set these via `wrangler secret put`)
-# WEATHER_API_KEY - Your WeatherAPI.com API key
-# WEATHER_PROVIDER - Provider name (default: weatherapi)
-# WEATHER_LOCATION - Location to fetch weather for (default: Manhattan)
-
-[env.production]
-vars = { WEATHER_PROVIDER = "weatherapi", WEATHER_LOCATION = "40.739214,-73.987265" }
+# Environment variables
+# WEATHER_API_KEY is set via `wrangler secret put` (not in this file for security)
+[vars]
+WEATHER_PROVIDER = "weatherapi"
+WEATHER_LOCATION = "40.739214,-73.987265"
 
 # Scheduled cron trigger - runs every 15 minutes
 [triggers]
