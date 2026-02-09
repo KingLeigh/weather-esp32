@@ -124,12 +124,9 @@ static void render_display(int current_temp, int high_temp, int low_temp, Weathe
     }
 
     // Gray fill for high UV (from current to high)
-    int32_t fill_w_hi = 0;
+    int32_t fill_w_hi = (uv_high > 0) ? (meter_w * uv_high / uv_max) : 0;
     if (uv_high > uv_current) {
-        fill_w_hi = meter_w * uv_high / uv_max;
         epd_fill_rect(meter_x + fill_w_now + 1, meter_y + 1, fill_w_hi - fill_w_now - 1, meter_h - 2, 0x80, framebuffer);
-    } else if (uv_high > 0) {
-        fill_w_hi = meter_w * uv_high / uv_max;
     }
 
     // Numbers positioned at their points on the meter (below)
