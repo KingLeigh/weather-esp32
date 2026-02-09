@@ -9,7 +9,9 @@ enum WeatherIcon {
     CLOUDY,
     PARTLY_CLOUDY,
     RAINY,
-    SNOWY
+    SNOWY,
+    THUNDERSTORM,
+    FOG
 };
 
 static void draw_sun(int32_t cx, int32_t cy, int32_t radius, uint8_t color, uint8_t *fb) {
@@ -70,6 +72,53 @@ static void draw_snow(int32_t cx, int32_t cy, int32_t size, uint8_t color, uint8
     }
 }
 
+static void draw_thunderstorm(int32_t cx, int32_t cy, int32_t size, uint8_t color, uint8_t *fb) {
+    // Cloud positioned higher
+    draw_cloud(cx, cy - size * 20 / 100, size, color, fb);
+
+    // Lightning bolt - zigzag pattern
+    int32_t bolt_top = cy + size * 10 / 100;
+    int32_t bolt_w = size * 12 / 100;
+    int32_t bolt_h = size * 30 / 100;
+
+    // Simple zigzag lightning bolt
+    int32_t x0 = cx;
+    int32_t y0 = bolt_top;
+    int32_t x1 = cx - bolt_w;
+    int32_t y1 = bolt_top + bolt_h / 3;
+    int32_t x2 = cx + bolt_w / 2;
+    int32_t y2 = bolt_top + bolt_h / 3;
+    int32_t x3 = cx - bolt_w / 2;
+    int32_t y3 = bolt_top + bolt_h;
+
+    // Draw lightning bolt with thick lines
+    epd_draw_line(x0, y0, x1, y1, color, fb);
+    epd_draw_line(x0 + 1, y0, x1 + 1, y1, color, fb);
+    epd_draw_line(x1, y1, x2, y2, color, fb);
+    epd_draw_line(x1 + 1, y1, x2 + 1, y2, color, fb);
+    epd_draw_line(x2, y2, x3, y3, color, fb);
+    epd_draw_line(x2 + 1, y2, x3 + 1, y3, color, fb);
+}
+
+static void draw_fog(int32_t cx, int32_t cy, int32_t size, uint8_t color, uint8_t *fb) {
+    // Draw horizontal fog/mist lines
+    int32_t line_w = size * 60 / 100;
+    int32_t line_spacing = size * 15 / 100;
+    int32_t start_y = cy - size * 20 / 100;
+
+    // Draw 4 horizontal wavy lines to represent fog
+    for (int i = 0; i < 4; i++) {
+        int32_t y = start_y + i * line_spacing;
+        int32_t x_start = cx - line_w / 2;
+        int32_t x_end = cx + line_w / 2;
+
+        // Draw slightly offset lines to make them thicker
+        epd_draw_hline(x_start, y, line_w, color, fb);
+        epd_draw_hline(x_start, y + 1, line_w, color, fb);
+        epd_draw_hline(x_start, y + 2, line_w, color, fb);
+    }
+}
+
 static void draw_partly_cloudy(int32_t cx, int32_t cy, int32_t size, uint8_t color, uint8_t *fb) {
     int32_t sun_r = size * 18 / 100;
     draw_sun(cx - size * 15 / 100, cy - size * 18 / 100, sun_r, color, fb);
@@ -112,10 +161,12 @@ static void draw_sun_small(int32_t cx, int32_t cy, uint8_t *fb) {
 
 static void draw_weather_icon(WeatherIcon icon, int32_t cx, int32_t cy, int32_t size, uint8_t *fb) {
     switch (icon) {
-        case SUNNY:        draw_sun(cx, cy, size * 30 / 100, ICON_COLOR, fb); break;
-        case CLOUDY:       draw_cloud(cx, cy, size, ICON_COLOR, fb); break;
+        case SUNNY:         draw_sun(cx, cy, size * 30 / 100, ICON_COLOR, fb); break;
+        case CLOUDY:        draw_cloud(cx, cy, size, ICON_COLOR, fb); break;
         case PARTLY_CLOUDY: draw_partly_cloudy(cx, cy, size, ICON_COLOR, fb); break;
-        case RAINY:        draw_rain(cx, cy, size, ICON_COLOR, fb); break;
-        case SNOWY:        draw_snow(cx, cy, size, ICON_COLOR, fb); break;
+        case RAINY:         draw_rain(cx, cy, size, ICON_COLOR, fb); break;
+        case SNOWY:         draw_snow(cx, cy, size, ICON_COLOR, fb); break;
+        case THUNDERSTORM:  draw_thunderstorm(cx, cy, size, ICON_COLOR, fb); break;
+        case FOG:           draw_fog(cx, cy, size, ICON_COLOR, fb); break;
     }
 }

@@ -98,6 +98,8 @@ WeatherIcon parseWeatherIcon(const char* weather_str) {
     if (strcmp(weather_str, "partly_cloudy") == 0) return PARTLY_CLOUDY;
     if (strcmp(weather_str, "rainy") == 0) return RAINY;
     if (strcmp(weather_str, "snowy") == 0) return SNOWY;
+    if (strcmp(weather_str, "thunderstorm") == 0) return THUNDERSTORM;
+    if (strcmp(weather_str, "fog") == 0) return FOG;
     return PARTLY_CLOUDY;  // default
 }
 
