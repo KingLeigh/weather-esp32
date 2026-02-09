@@ -24,6 +24,23 @@ WeatherData prev_weather;
 int prev_battery_percent = -1;
 int consecutive_failures = 0;  // Track how many updates failed in a row
 
+// Read battery percentage from ADC
+static int read_battery_percent() {
+    epd_poweron();
+    delay(10);
+    uint16_t v = analogRead(BATT_PIN);
+    epd_poweroff();
+
+    float battery_voltage = ((float)v / 4095.0) * 2.0 * 3.3 * (vref / 1000.0);
+    if (battery_voltage > 4.2) battery_voltage = 4.2;
+
+    int battery_percent = (int)((battery_voltage - 3.0) / 1.2 * 100);
+    if (battery_percent < 0) battery_percent = 0;
+    if (battery_percent > 100) battery_percent = 100;
+
+    return battery_percent;
+}
+
 // Draw battery icon with fill level
 static void draw_battery_icon(int32_t x, int32_t y, int percent, uint8_t *fb) {
     int32_t w = 40, h = 20, tip_w = 4;
@@ -257,18 +274,8 @@ void setup()
         }
     }
 
-    // Read battery voltage
-    epd_poweron();
-    delay(10);
-    uint16_t v = analogRead(BATT_PIN);
-    epd_poweroff();
-    float battery_voltage = ((float)v / 4095.0) * 2.0 * 3.3 * (vref / 1000.0);
-    if (battery_voltage > 4.2) battery_voltage = 4.2;
-    int battery_percent = (int)((battery_voltage - 3.0) / 1.2 * 100);
-    if (battery_percent < 0) battery_percent = 0;
-    if (battery_percent > 100) battery_percent = 100;
-
-    // Render display
+    // Read battery and render display
+    int battery_percent = read_battery_percent();
     const char* timestamp_for_display = weather.valid ? weather.updated : prev_weather.updated;
     render_display(current_temp, high_temp, low_temp, icon, precip_pct, current_hour,
                    uv_current, uv_high, timestamp_for_display, battery_percent, consecutive_failures);
@@ -325,18 +332,8 @@ void loop()
         }
     }
 
-    // Read battery voltage
-    epd_poweron();
-    delay(10);
-    uint16_t v = analogRead(BATT_PIN);
-    epd_poweroff();
-    float battery_voltage = ((float)v / 4095.0) * 2.0 * 3.3 * (vref / 1000.0);
-    if (battery_voltage > 4.2) battery_voltage = 4.2;
-    int battery_percent = (int)((battery_voltage - 3.0) / 1.2 * 100);
-    if (battery_percent < 0) battery_percent = 0;
-    if (battery_percent > 100) battery_percent = 100;
-
-    // Check if data changed (including timestamp for freshness indication)
+    // Read battery and check for changes
+    int battery_percent = read_battery_percent();
     bool data_changed = weather_data_changed(&prev_weather, &weather, prev_battery_percent, battery_percent);
 
     if (!data_changed) {
