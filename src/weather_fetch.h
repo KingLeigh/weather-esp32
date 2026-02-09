@@ -10,13 +10,6 @@
 #include "wifi_config.h"
 #include "weather_icons.h"
 
-// Error types for weather data fetch failures
-enum WeatherError {
-    ERROR_NONE = 0,
-    ERROR_NETWORK = 1,  // WiFi connection failed
-    ERROR_DATA = 2      // API/HTTP request failed
-};
-
 // Weather data structure
 struct WeatherData {
     int temp_current;
@@ -28,7 +21,6 @@ struct WeatherData {
     int uv_high;
     char updated[32];
     bool valid;
-    WeatherError error_type;
 };
 
 // Connect to WiFi

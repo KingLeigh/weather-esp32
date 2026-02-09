@@ -223,22 +223,18 @@ void setup()
     // --- Connect to WiFi and fetch weather data ---
     WeatherData weather;
     weather.valid = false;
-    weather.error_type = ERROR_NONE;
 
     if (connectWiFi()) {
         if (fetchWeatherData(&weather)) {
             Serial.println("Weather data fetched successfully!");
-            weather.error_type = ERROR_NONE;
             consecutive_failures = 0;
         } else {
             Serial.println("Failed to fetch weather data");
-            weather.error_type = ERROR_DATA;
             consecutive_failures = 1;
         }
         disconnectWiFi();  // Save power
     } else {
         Serial.println("WiFi connection failed");
-        weather.error_type = ERROR_NETWORK;
         consecutive_failures = 1;
     }
 
@@ -295,22 +291,18 @@ void loop()
     // Fetch fresh weather data
     WeatherData weather;
     weather.valid = false;
-    weather.error_type = ERROR_NONE;
 
     if (connectWiFi()) {
         if (fetchWeatherData(&weather)) {
             Serial.println("Weather data fetched successfully!");
-            weather.error_type = ERROR_NONE;
             consecutive_failures = 0;  // Reset failure counter on success
         } else {
             Serial.println("Failed to fetch weather data");
-            weather.error_type = ERROR_DATA;
             consecutive_failures++;
         }
         disconnectWiFi();
     } else {
         Serial.println("WiFi connection failed");
-        weather.error_type = ERROR_NETWORK;
         consecutive_failures++;
     }
 

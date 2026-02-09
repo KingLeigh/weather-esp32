@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:wiki.lilygo.cc)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:www.makerguides.com)",
+      "Bash(pip3:*)",
+      "Bash(export PATH=\"$HOME/Library/Python/3.9/bin:$PATH\")",
+      "Bash(pio:*)",
+      "Bash(git init:*)",
+      "Bash(gh api:*)",
+      "Bash(python3:*)",
+      "Bash(ls:*)",
+      "Bash(system_profiler:*)",
+      "Bash(curl:*)",
+      "Bash(# Check what line heights different sizes produce for sz in 40 48 56; do echo \"\"=== Size $sz ===\"\" python3 /tmp/fontconvert_weather.py --compress --chars \"\"0123456789-°\"\" FiraSansLarge $sz /tmp/FiraSans-Bold.ttf)",
+      "Bash(done)",
+      "Bash(for sz in 26 28 30)",
+      "Bash(do echo \"=== Size $sz ===\" python3 /tmp/fontconvert_weather.py --compress --chars \"0123456789-°HL \" FiraSansMedium $sz /tmp/FiraSans-Bold.ttf)",
+      "Bash(git add:*)",
+      "Bash(gh auth status:*)",
+      "Bash(open:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nImprove weather display: line chart, puffy clouds, random test data\n\n- Precipitation chart changed from bar graph to time series line chart\n  with shaded fill, fixed 0-100% y-axis, and half-width layout\n- Cloud icon redrawn with overlapping circles for a puffier look\n- All weather data randomized on each boot for testing\n- Deep sleep disabled for easier development \\(preserved in #if 0 block\\)\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git push:*)",
+      "Bash(wrangler:*)",
+      "Bash(git commit:*)",
+      "Bash(WEATHER_API_KEY=0e50f020f22940778f3160540260902 node test.js:*)",
+      "Bash(npx wrangler deploy:*)",
+      "Bash(npx wrangler:*)",
+      "Bash(find:*)",
+      "Bash(lsof:*)",
+      "Bash(xargs kill:*)"
+    ]
+  }
+}
