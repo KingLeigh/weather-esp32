@@ -17,7 +17,7 @@
 uint8_t *framebuffer = NULL;
 uint32_t vref = 1100;  // ADC reference voltage
 
-#define UPDATE_INTERVAL_SECONDS 60  // Update every 60 seconds (for debugging)
+#define UPDATE_INTERVAL_SECONDS 60  // Update every 60 seconds
 
 // Track previous weather data to detect changes
 WeatherData prev_weather;
