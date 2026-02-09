@@ -1,0 +1,14 @@
+{
+  "temperature": {
+    "current": 72,
+    "high": 78,
+    "low": 65
+  },
+  "weather": "partly_cloudy",
+  "precipitation": [0, 0, 10, 20, 45, 60, 40, 20, 10, 5, 0, 0],
+  "uv": {
+    "current": 6,
+    "high": 9
+  },
+  "updated": "2024-02-08T14:30:42Z"
+}
