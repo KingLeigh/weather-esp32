@@ -19,6 +19,10 @@ uint32_t vref = 1100;  // ADC reference voltage
 
 #define UPDATE_INTERVAL_SECONDS 60  // Update every 60 seconds (for debugging)
 
+// Track previous weather data to detect changes
+WeatherData prev_weather;
+int prev_battery_percent = -1;
+
 // Draw battery icon with fill level
 static void draw_battery_icon(int32_t x, int32_t y, int percent, uint8_t *fb) {
     int32_t w = 40, h = 20, tip_w = 4;
@@ -33,6 +37,41 @@ static void draw_battery_icon(int32_t x, int32_t y, int percent, uint8_t *fb) {
     if (fill_w > 0) {
         epd_fill_rect(x + 1, y + 1, fill_w, h - 2, 0x50, fb);
     }
+}
+
+// Check if weather data has changed (including timestamp)
+static bool weather_data_changed(const WeatherData* old_data, const WeatherData* new_data, int old_battery, int new_battery) {
+    // Always update if validity changed
+    if (old_data->valid != new_data->valid) return true;
+
+    // If both invalid, no change
+    if (!old_data->valid && !new_data->valid) return false;
+
+    // Check timestamp - this shows data freshness and prevents ghosting
+    if (strcmp(old_data->updated, new_data->updated) != 0) return true;
+
+    // Check temperature changes
+    if (old_data->temp_current != new_data->temp_current) return true;
+    if (old_data->temp_high != new_data->temp_high) return true;
+    if (old_data->temp_low != new_data->temp_low) return true;
+
+    // Check weather icon
+    if (old_data->weather != new_data->weather) return true;
+
+    // Check UV
+    if (old_data->uv_current != new_data->uv_current) return true;
+    if (old_data->uv_high != new_data->uv_high) return true;
+
+    // Check precipitation array
+    for (int i = 0; i < 12; i++) {
+        if (old_data->precipitation[i] != new_data->precipitation[i]) return true;
+    }
+
+    // Check battery (allow 5% tolerance to avoid flashing on minor voltage fluctuations)
+    if (abs(old_battery - new_battery) > 5) return true;
+
+    // No significant changes
+    return false;
 }
 
 void setup()
@@ -198,6 +237,10 @@ void setup()
 
     Serial.println("Weather display updated");
     Serial.printf("Next update in %d seconds...\n\n", UPDATE_INTERVAL_SECONDS);
+
+    // Save current weather data for change detection
+    prev_weather = weather;
+    prev_battery_percent = battery_percent;
 }
 
 void loop()
@@ -232,9 +275,6 @@ void loop()
     int uv_current = weather.valid ? weather.uv_current : 0;
     int uv_high = weather.valid ? weather.uv_high : 0;
 
-    // Clear framebuffer
-    memset(framebuffer, 0xFF, EPD_WIDTH * EPD_HEIGHT / 2);
-
     // Read battery voltage
     epd_poweron();
     delay(10);
@@ -245,6 +285,20 @@ void loop()
     int battery_percent = (int)((battery_voltage - 3.0) / 1.2 * 100);
     if (battery_percent < 0) battery_percent = 0;
     if (battery_percent > 100) battery_percent = 100;
+
+    // Check if data changed (including timestamp for freshness indication)
+    bool data_changed = weather_data_changed(&prev_weather, &weather, prev_battery_percent, battery_percent);
+
+    if (!data_changed) {
+        Serial.println("No changes detected - skipping display update");
+        Serial.printf("Next update in %d seconds...\n\n", UPDATE_INTERVAL_SECONDS);
+        return;  // Skip display update
+    }
+
+    Serial.println("Data changed - updating display");
+
+    // Clear framebuffer
+    memset(framebuffer, 0xFF, EPD_WIDTH * EPD_HEIGHT / 2);
 
     // Draw all display elements (same as in setup)
     char temp_str[8];
@@ -334,4 +388,8 @@ void loop()
 
     Serial.println("Weather display updated");
     Serial.printf("Next update in %d seconds...\n\n", UPDATE_INTERVAL_SECONDS);
+
+    // Save current weather data for next comparison
+    prev_weather = weather;
+    prev_battery_percent = battery_percent;
 }
