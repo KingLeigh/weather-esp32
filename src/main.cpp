@@ -5,6 +5,7 @@
 #include <Arduino.h>
 #include <esp_sleep.h>
 #include <esp_adc_cal.h>
+#include <time.h>
 #include "epd_driver.h"
 #include "utilities.h"
 #include "firasans.h"
@@ -33,6 +34,71 @@ static int parse_hour_from_timestamp(const char* timestamp) {
         return hour;
     }
     return 0;  // Default to midnight if parsing fails
+}
+
+// Parse ISO timestamp to epoch time (e.g., "2025-01-15T14:30:00" -> epoch seconds)
+static time_t parse_timestamp_to_epoch(const char* timestamp) {
+    if (!timestamp || strlen(timestamp) == 0) return 0;
+
+    struct tm timeinfo = {0};
+    int year, month, day, hour, minute, second;
+
+    // Parse ISO 8601 format: YYYY-MM-DDTHH:MM:SS
+    if (sscanf(timestamp, "%d-%d-%dT%d:%d:%d", &year, &month, &day, &hour, &minute, &second) == 6) {
+        timeinfo.tm_year = year - 1900;  // tm_year is years since 1900
+        timeinfo.tm_mon = month - 1;     // tm_mon is 0-11
+        timeinfo.tm_mday = day;
+        timeinfo.tm_hour = hour;
+        timeinfo.tm_min = minute;
+        timeinfo.tm_sec = second;
+        timeinfo.tm_isdst = -1;          // Let mktime determine DST
+
+        return mktime(&timeinfo);
+    }
+
+    return 0;  // Failed to parse
+}
+
+// Calculate data age and format as string (e.g., "5m" or "1h 23m")
+static void format_data_age(const char* timestamp, char* output, size_t output_size) {
+    if (!timestamp || strlen(timestamp) == 0) {
+        strncpy(output, "--", output_size);
+        return;
+    }
+
+    // Get current time
+    time_t now;
+    time(&now);
+
+    // Parse API timestamp
+    time_t data_time = parse_timestamp_to_epoch(timestamp);
+
+    if (data_time == 0 || now == 0) {
+        // Time not synced yet or parse failed
+        strncpy(output, "??", output_size);
+        return;
+    }
+
+    // Calculate age in seconds
+    int age_seconds = (int)difftime(now, data_time);
+
+    if (age_seconds < 0) {
+        // Clock skew - data timestamp is in the future
+        strncpy(output, "0m", output_size);
+        return;
+    }
+
+    int age_minutes = age_seconds / 60;
+    int age_hours = age_minutes / 60;
+    int remaining_minutes = age_minutes % 60;
+
+    if (age_hours > 0) {
+        // Show hours and minutes (e.g., "1h 23m")
+        snprintf(output, output_size, "%dh %dm", age_hours, remaining_minutes);
+    } else {
+        // Show just minutes (e.g., "5m")
+        snprintf(output, output_size, "%dm", age_minutes);
+    }
 }
 
 // Read battery percentage from ADC
@@ -146,20 +212,9 @@ static void render_display(int current_temp, int high_temp, int low_temp, Weathe
         writeln((GFXfont *)&FiraSans, uv_hi_str, &hx, &hy, framebuffer);
     }
 
-    // --- Timestamp with battery icon (lower-right corner) ---
-    char updated_str[16];
-    if (strlen(timestamp) > 0) {
-        // Parse ISO timestamp and extract time
-        int hour, minute, second;
-        if (sscanf(timestamp, "%*d-%*d-%*dT%d:%d:%d", &hour, &minute, &second) == 3) {
-            snprintf(updated_str, sizeof(updated_str), "%02d:%02d:%02d", hour, minute, second);
-        } else {
-            strcpy(updated_str, "??:??:??");
-        }
-    } else {
-        // No timestamp available (first boot and failed)
-        strcpy(updated_str, "--:--:--");
-    }
+    // --- Data age with battery icon (lower-right corner) ---
+    char age_str[16];
+    format_data_age(timestamp, age_str, sizeof(age_str));
     int32_t ux = EPD_WIDTH - 170, uy = EPD_HEIGHT - 15;
 
     // Failure indicator to the left of battery icon (if any failures)
@@ -174,10 +229,10 @@ static void render_display(int current_temp, int high_temp, int low_temp, Weathe
         writeln((GFXfont *)&FiraSans, failure_str, &fx, &fy, framebuffer);
     }
 
-    // Battery icon to the left of timestamp (centered vertically)
+    // Battery icon to the left of age display (centered vertically)
     draw_battery_icon(ux - 55, uy - 20, battery_percent, framebuffer);
 
-    writeln((GFXfont *)&FiraSans, updated_str, &ux, &uy, framebuffer);
+    writeln((GFXfont *)&FiraSans, age_str, &ux, &uy, framebuffer);
 
     // Push to display
     epd_poweron();

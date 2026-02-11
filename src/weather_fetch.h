@@ -79,6 +79,12 @@ bool connectWiFi() {
         Serial.printf("DNS 1: %s\n", WiFi.dnsIP(0).toString().c_str());
         Serial.printf("DNS 2: %s\n", WiFi.dnsIP(1).toString().c_str());
         Serial.printf("Signal: %d dBm\n", WiFi.RSSI());
+
+        // Configure NTP for time synchronization
+        // GMT offset: 0 (UTC), daylight offset: 0, NTP server: pool.ntp.org
+        configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+        Serial.println("NTP time sync initiated");
+
         return true;
     } else {
         Serial.printf("WiFi connection failed! Final status: %d\n", WiFi.status());
