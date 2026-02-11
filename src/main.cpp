@@ -3,7 +3,6 @@
 #endif
 
 #include <Arduino.h>
-#include <esp_sleep.h>
 #include <esp_adc_cal.h>
 #include <time.h>
 #include "epd_driver.h"
@@ -24,18 +23,6 @@ uint32_t vref = 1100;  // ADC reference voltage
 WeatherData prev_weather;
 int prev_battery_percent = -1;
 int prev_age_minutes = -1;  // Track previous age for change detection
-int consecutive_failures = 0;  // Track how many updates failed in a row
-
-// Parse hour from ISO timestamp (e.g., "2025-01-15T14:30:00" -> 14)
-static int parse_hour_from_timestamp(const char* timestamp) {
-    if (!timestamp || strlen(timestamp) == 0) return 0;
-
-    int hour, minute, second;
-    if (sscanf(timestamp, "%*d-%*d-%*dT%d:%d:%d", &hour, &minute, &second) == 3) {
-        return hour;
-    }
-    return 0;  // Default to midnight if parsing fails
-}
 
 // Parse ISO timestamp to epoch time (e.g., "2025-01-15T14:30:00" -> epoch seconds)
 static time_t parse_timestamp_to_epoch(const char* timestamp) {
@@ -58,6 +45,15 @@ static time_t parse_timestamp_to_epoch(const char* timestamp) {
     }
 
     return 0;  // Failed to parse
+}
+
+// Extract hour from ISO timestamp for chart labels (e.g., "2025-01-15T14:30:00" -> 14)
+static int parse_hour_from_timestamp(const char* timestamp) {
+    time_t epoch = parse_timestamp_to_epoch(timestamp);
+    if (epoch == 0) return 0;
+
+    struct tm* timeinfo = localtime(&epoch);
+    return timeinfo ? timeinfo->tm_hour : 0;
 }
 
 // Calculate data age in minutes (returns -1 if invalid)
@@ -176,7 +172,7 @@ static void render_display(int current_temp, int high_temp, int low_temp, Weathe
     epd_draw_hline(40, 265, 880, 0x80, framebuffer);
 
     // --- Precipitation chart (half width, moved down for more room) ---
-    draw_precip_chart(40, 295, 440, 210, precip_pct, 12, current_hour, framebuffer);
+    draw_precip_chart(40, 295, 440, 210, precip_pct, PRECIP_HOURS, current_hour, framebuffer);
 
     // --- UV Index (right half of lower section) ---
     draw_sun_small(570, 325, framebuffer);
@@ -269,7 +265,7 @@ static bool weather_data_changed(const WeatherData* old_data, const WeatherData*
     if (old_data->uv_high != new_data->uv_high) return true;
 
     // Check precipitation array
-    for (int i = 0; i < 12; i++) {
+    for (int i = 0; i < PRECIP_HOURS; i++) {
         if (old_data->precipitation[i] != new_data->precipitation[i]) return true;
     }
 
@@ -311,15 +307,12 @@ void setup()
     if (connectWiFi()) {
         if (fetchWeatherData(&weather)) {
             Serial.println("Weather data fetched successfully!");
-            consecutive_failures = 0;
         } else {
             Serial.println("Failed to fetch weather data");
-            consecutive_failures = 1;
         }
         disconnectWiFi();  // Save power
     } else {
         Serial.println("WiFi connection failed");
-        consecutive_failures = 1;
     }
 
     // Use fetched data, or show zeros if fetch failed (clear error indication)
@@ -327,7 +320,7 @@ void setup()
     int high_temp = weather.valid ? weather.temp_high : 0;
     int low_temp = weather.valid ? weather.temp_low : 0;
     WeatherIcon icon = weather.valid ? weather.weather : CLOUDY;  // Cloudy = error indicator
-    int precip_zero[12] = {0,0,0,0,0,0,0,0,0,0,0,0};
+    int precip_zero[PRECIP_HOURS] = {0};
     int* precip_pct = weather.valid ? weather.precipitation : precip_zero;
     int uv_current = weather.valid ? weather.uv_current : 0;
     int uv_high = weather.valid ? weather.uv_high : 0;
@@ -368,15 +361,12 @@ void loop()
     if (connectWiFi()) {
         if (fetchWeatherData(&weather)) {
             Serial.println("Weather data fetched successfully!");
-            consecutive_failures = 0;  // Reset failure counter on success
         } else {
             Serial.println("Failed to fetch weather data");
-            consecutive_failures++;
         }
         disconnectWiFi();
     } else {
         Serial.println("WiFi connection failed");
-        consecutive_failures++;
     }
 
     // Use fetched data if valid, otherwise keep showing previous data

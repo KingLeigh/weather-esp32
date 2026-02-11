@@ -10,13 +10,15 @@
 #include "wifi_config.h"
 #include "weather_icons.h"
 
+#define PRECIP_HOURS 12  // Number of hourly precipitation data points
+
 // Weather data structure
 struct WeatherData {
     int temp_current;
     int temp_high;
     int temp_low;
     WeatherIcon weather;
-    int precipitation[12];
+    int precipitation[PRECIP_HOURS];
     int uv_current;
     int uv_high;
     char updated[32];
@@ -81,8 +83,10 @@ bool connectWiFi() {
         Serial.printf("Signal: %d dBm\n", WiFi.RSSI());
 
         // Configure NTP for time synchronization
-        // Use EST timezone (GMT-5, with DST)
-        configTime(-5 * 3600, 3600, "pool.ntp.org", "time.nist.gov");
+        // POSIX TZ string: EST5EDT = UTC-5, with EDT (UTC-4) from 2nd Sun Mar to 1st Sun Nov
+        configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+        setenv("TZ", "EST5EDT,M3.2.0,M11.1.0", 1);
+        tzset();
         Serial.println("NTP time sync initiated (EST/EDT)");
 
         return true;
@@ -158,7 +162,7 @@ bool fetchWeatherData(WeatherData* data) {
 
             // Precipitation array
             JsonArray precip_array = doc["precipitation"];
-            for (int i = 0; i < 12; i++) {
+            for (int i = 0; i < PRECIP_HOURS; i++) {
                 data->precipitation[i] = (i < precip_array.size()) ? precip_array[i].as<int>() : 0;
             }
 
