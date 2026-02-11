@@ -6,8 +6,10 @@
 
 enum WeatherIcon {
     SUNNY,
+    MOON,
     CLOUDY,
     PARTLY_CLOUDY,
+    PARTLY_CLOUDY_NIGHT,
     RAINY,
     SNOWY,
     THUNDERSTORM,
@@ -60,11 +62,17 @@ static void draw_weather_icon(WeatherIcon icon, int32_t cx, int32_t cy, int32_t 
         case SUNNY:
             bitmap = icon_sun_200;
             break;
+        case MOON:
+            bitmap = icon_moon_200;
+            break;
         case CLOUDY:
             bitmap = icon_cloud_200;
             break;
         case PARTLY_CLOUDY:
             bitmap = icon_partly_200;
+            break;
+        case PARTLY_CLOUDY_NIGHT:
+            bitmap = icon_partly_night_200;
             break;
         case RAINY:
             bitmap = icon_rainy_200;

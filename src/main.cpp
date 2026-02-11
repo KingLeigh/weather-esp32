@@ -146,7 +146,7 @@ static void render_display(int current_temp, int high_temp, int low_temp, Weathe
     writeln((GFXfont *)&FiraSansLarge, temp_str, &cx, &cy, framebuffer);
 
     // --- Weather icon (top-right) ---
-    draw_weather_icon(icon, 780, 110, 200, framebuffer);
+    draw_weather_icon(icon, 780, 122, 200, framebuffer);
 
     // --- High / Low temps (medium font, below current temp) ---
     char hi_str[16], lo_str[16];

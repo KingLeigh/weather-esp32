@@ -56,10 +56,10 @@ static void draw_precip_chart(int32_t x, int32_t y, int32_t w, int32_t h,
     // Title (centered below chart)
     // Note: writeln y-coordinate is the text BASELINE, text extends upward ~20px
     const char *title = "Rain (12h)";
-    // Center the text horizontally, then shift left by half its width
+    // Center the text horizontally (with slight left adjustment)
     // FiraSans ~12px per character for more accurate centering
     int32_t text_width = strlen(title) * 12;
-    int32_t tx = x + (w - text_width) / 2 - text_width / 2;
+    int32_t tx = x + (w - text_width) / 2 - text_width / 4;
     // Position baseline below chart with spacing for text height + gap
     int32_t ty = chart_bottom + 45;  // 45px below chart bottom
     writeln((GFXfont *)&FiraSans, title, &tx, &ty, fb);

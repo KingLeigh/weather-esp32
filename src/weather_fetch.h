@@ -22,6 +22,7 @@ struct WeatherData {
     int uv_current;
     int uv_high;
     char updated[32];
+    bool is_day;
     bool valid;
 };
 
@@ -102,10 +103,16 @@ bool connectWiFi() {
 }
 
 // Map weather string to WeatherIcon enum
-WeatherIcon parseWeatherIcon(const char* weather_str) {
-    if (strcmp(weather_str, "sunny") == 0) return SUNNY;
+WeatherIcon parseWeatherIcon(const char* weather_str, bool is_day) {
+    // Clear night: show moon instead of sun
+    if (strcmp(weather_str, "sunny") == 0) {
+        return is_day ? SUNNY : MOON;
+    }
+    // Partly cloudy night: show moon with clouds
+    if (strcmp(weather_str, "partly_cloudy") == 0) {
+        return is_day ? PARTLY_CLOUDY : PARTLY_CLOUDY_NIGHT;
+    }
     if (strcmp(weather_str, "cloudy") == 0) return CLOUDY;
-    if (strcmp(weather_str, "partly_cloudy") == 0) return PARTLY_CLOUDY;
     if (strcmp(weather_str, "rainy") == 0) return RAINY;
     if (strcmp(weather_str, "snowy") == 0) return SNOWY;
     if (strcmp(weather_str, "thunderstorm") == 0) return THUNDERSTORM;
@@ -158,7 +165,8 @@ bool fetchWeatherData(WeatherData* data) {
             data->temp_low = doc["temperature"]["low"] | 0;
 
             const char* weather_str = doc["weather"] | "partly_cloudy";
-            data->weather = parseWeatherIcon(weather_str);
+            data->is_day = doc["is_day"] | true;  // Default to day if not present
+            data->weather = parseWeatherIcon(weather_str, data->is_day);
 
             // Precipitation array
             JsonArray precip_array = doc["precipitation"];

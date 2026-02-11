@@ -63,6 +63,7 @@ export class WeatherAPIProvider extends WeatherProvider {
         current: Math.round(current.uv),
         high: uvHigh
       },
+      is_day: current.is_day === 1,
       // Return Eastern Time formatted as YYYY-MM-DDTHH:MM:SS
       updated: (() => {
         const formatter = new Intl.DateTimeFormat('en-US', {

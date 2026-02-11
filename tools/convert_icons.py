@@ -61,11 +61,13 @@ def png_to_epd47_bitmap(png_path, output_size=200):
 
     # Generate C array
     icon_name = os.path.splitext(os.path.basename(png_path))[0]
+    # Replace hyphens with underscores for valid C identifier
+    icon_name_c = icon_name.replace('-', '_')
 
     # Format as C array with 12 bytes per line
     lines = []
     lines.append(f"// {icon_name}.png - {output_size}x{output_size} 4-bit grayscale")
-    lines.append(f"const uint8_t icon_{icon_name}_{output_size}[] = {{")
+    lines.append(f"const uint8_t icon_{icon_name_c}_{output_size}[] = {{")
 
     for i in range(0, len(byte_array), 12):
         chunk = byte_array[i:i+12]
@@ -83,7 +85,9 @@ def main():
 
     icons = [
         "sun.png",
+        "moon.png",
         "partly.png",
+        "partly-night.png",
         "cloud.png",
         "rainy.png",
         "snowflake.png",
