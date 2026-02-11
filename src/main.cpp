@@ -137,7 +137,7 @@ static void draw_battery_icon(int32_t x, int32_t y, int percent, uint8_t *fb) {
 // Render all display elements to framebuffer
 static void render_display(int current_temp, int high_temp, int low_temp, WeatherIcon icon,
                            int* precip_pct, int current_hour, int uv_current, int uv_high,
-                           const char* timestamp, int battery_percent, int failures) {
+                           const char* timestamp, int battery_percent) {
     // Clear framebuffer
     memset(framebuffer, 0xFF, EPD_WIDTH * EPD_HEIGHT / 2);
 
@@ -216,18 +216,6 @@ static void render_display(int current_temp, int high_temp, int low_temp, Weathe
     char age_str[16];
     format_data_age(timestamp, age_str, sizeof(age_str));
     int32_t ux = EPD_WIDTH - 170, uy = EPD_HEIGHT - 15;
-
-    // Failure indicator to the left of battery icon (if any failures)
-    if (failures > 0) {
-        char failure_str[8];
-        if (failures == 1) {
-            strcpy(failure_str, "?");
-        } else {
-            snprintf(failure_str, sizeof(failure_str), "%d?", failures);
-        }
-        int32_t fx = ux - 100, fy = uy;
-        writeln((GFXfont *)&FiraSans, failure_str, &fx, &fy, framebuffer);
-    }
 
     // Battery icon to the left of age display (centered vertically)
     draw_battery_icon(ux - 55, uy - 20, battery_percent, framebuffer);
@@ -335,7 +323,7 @@ void setup()
     int battery_percent = read_battery_percent();
     const char* timestamp_for_display = weather.valid ? weather.updated : prev_weather.updated;
     render_display(current_temp, high_temp, low_temp, icon, precip_pct, current_hour,
-                   uv_current, uv_high, timestamp_for_display, battery_percent, consecutive_failures);
+                   uv_current, uv_high, timestamp_for_display, battery_percent);
 
     Serial.println("Weather display updated");
     Serial.printf("Next update in %d seconds...\n\n", UPDATE_INTERVAL_SECONDS);
@@ -398,7 +386,7 @@ void loop()
     // Render display
     const char* timestamp_for_display = weather.valid ? weather.updated : prev_weather.updated;
     render_display(current_temp, high_temp, low_temp, icon, precip_pct, current_hour,
-                   uv_current, uv_high, timestamp_for_display, battery_percent, consecutive_failures);
+                   uv_current, uv_high, timestamp_for_display, battery_percent);
 
     Serial.println("Weather display updated");
     Serial.printf("Next update in %d seconds...\n\n", UPDATE_INTERVAL_SECONDS);
