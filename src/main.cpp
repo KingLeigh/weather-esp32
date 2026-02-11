@@ -214,8 +214,8 @@ static bool weather_data_changed(const WeatherData* old_data, const WeatherData*
         if (old_data->precipitation[i] != new_data->precipitation[i]) return true;
     }
 
-    // Check battery (allow 5% tolerance to avoid flashing on minor voltage fluctuations)
-    if (abs(old_battery - new_battery) > 5) return true;
+    // Check battery (allow 10% tolerance to avoid flashing on minor voltage fluctuations)
+    if (abs(old_battery - new_battery) > 10) return true;
 
     // No significant changes
     return false;
