@@ -7,26 +7,18 @@
 // w, h: width and height of chart area
 // data: array of precipitation percentages (0-100)
 // count: number of data points
-// current_hour: current hour (0-23) for x-axis labels
 // fb: framebuffer
 static void draw_precip_chart(int32_t x, int32_t y, int32_t w, int32_t h,
-                               const int *data, int count, int current_hour, uint8_t *fb) {
-    const int32_t label_h = 40;  // More breathing room for labels
-    const int32_t title_h = 25;
-    const int32_t chart_h = h - label_h - title_h;
-    const int32_t chart_y = y + title_h;
+                               const int *data, int count, uint8_t *fb) {
+    // Use full height for chart since title is now below
+    const int32_t chart_h = h;
+    const int32_t chart_y = y;
     const int32_t chart_bottom = chart_y + chart_h;
 
-    // Title
-    const char *title = "12hr Rain";
-    int32_t tx = x;
-    int32_t ty = y + 20;
-    writeln((GFXfont *)&FiraSans, title, &tx, &ty, fb);
-
-    // Gridlines at 0%, 25%, 50%, 75%, 100%
-    for (int pct = 0; pct <= 100; pct += 25) {
+    // Gridlines at 0%, 25%, 50%, 75% (no 100% line)
+    for (int pct = 0; pct < 100; pct += 25) {
         int32_t gy = chart_bottom - (chart_h * pct / 100);
-        uint8_t color = (pct == 0 || pct == 100) ? 0xA0 : 0xC0;
+        uint8_t color = (pct == 0) ? 0xA0 : 0xC0;
         epd_draw_hline(x, gy, w, color, fb);
     }
 
@@ -61,20 +53,14 @@ static void draw_precip_chart(int32_t x, int32_t y, int32_t w, int32_t h,
         epd_draw_line(px[i], py[i] + 1, px[i + 1], py[i + 1] + 1, 0x00, fb);
     }
 
-    // Hour labels along x-axis (first, middle, last only)
-    int label_indices[] = {0, count / 2, count - 1};
-    for (int j = 0; j < 3; j++) {
-        int i = label_indices[j];
-        char label[4];
-        // Calculate actual hour: current hour + offset, wrapped to 24 hours
-        int hour_24 = (current_hour + i) % 24;
-        // Convert to 12-hour format
-        int hour = hour_24 % 12;
-        if (hour == 0) hour = 12;
-        snprintf(label, sizeof(label), "%d", hour);
-
-        int32_t lx = px[i] - 5;
-        int32_t ly = chart_bottom + 35;  // Extra space to avoid chart line
-        writeln((GFXfont *)&FiraSans, label, &lx, &ly, fb);
-    }
+    // Title (centered below chart)
+    // Note: writeln y-coordinate is the text BASELINE, text extends upward ~20px
+    const char *title = "Rain (12h)";
+    // Center the text horizontally, then shift left by half its width
+    // FiraSans ~12px per character for more accurate centering
+    int32_t text_width = strlen(title) * 12;
+    int32_t tx = x + (w - text_width) / 2 - text_width / 2;
+    // Position baseline below chart with spacing for text height + gap
+    int32_t ty = chart_bottom + 45;  // 45px below chart bottom
+    writeln((GFXfont *)&FiraSans, title, &tx, &ty, fb);
 }

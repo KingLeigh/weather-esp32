@@ -14,11 +14,16 @@ enum WeatherIcon {
     FOG
 };
 
-// Small sun icon for UV index panel (kept as primitive drawing for consistency)
+// Small sun icon for UV index panel - hollow center with heavier rays
 static void draw_sun_small(int32_t cx, int32_t cy, uint8_t *fb) {
     int32_t r = 14;
     uint8_t color = 0x50;  // soft gray
-    epd_fill_circle(cx, cy, r, color, fb);
+
+    // Draw hollow sun (outline only, not filled)
+    epd_draw_circle(cx, cy, r, color, fb);
+    epd_draw_circle(cx, cy, r - 1, color, fb);  // Thicken the outline
+
+    // Draw heavier rays (8 rays, thicker than before)
     int32_t inner = r + 4;
     int32_t outer = r + 12;
     for (int i = 0; i < 8; i++) {
@@ -27,8 +32,11 @@ static void draw_sun_small(int32_t cx, int32_t cy, uint8_t *fb) {
         int32_t y0 = cy + (int32_t)(inner * sin(angle));
         int32_t x1 = cx + (int32_t)(outer * cos(angle));
         int32_t y1 = cy + (int32_t)(outer * sin(angle));
+
+        // Draw thicker rays (3 parallel lines per ray)
         epd_draw_line(x0, y0, x1, y1, color, fb);
         epd_draw_line(x0 + 1, y0, x1 + 1, y1, color, fb);
+        epd_draw_line(x0, y0 + 1, x1, y1 + 1, color, fb);
     }
 }
 

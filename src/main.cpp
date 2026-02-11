@@ -47,15 +47,6 @@ static time_t parse_timestamp_to_epoch(const char* timestamp) {
     return 0;  // Failed to parse
 }
 
-// Extract hour from ISO timestamp for chart labels (e.g., "2025-01-15T14:30:00" -> 14)
-static int parse_hour_from_timestamp(const char* timestamp) {
-    time_t epoch = parse_timestamp_to_epoch(timestamp);
-    if (epoch == 0) return 0;
-
-    struct tm* timeinfo = localtime(&epoch);
-    return timeinfo ? timeinfo->tm_hour : 0;
-}
-
 // Calculate data age in minutes (returns -1 if invalid)
 static int get_data_age_minutes(const char* timestamp) {
     if (!timestamp || strlen(timestamp) == 0) {
@@ -143,7 +134,7 @@ static void draw_battery_icon(int32_t x, int32_t y, int percent, uint8_t *fb) {
 
 // Render all display elements to framebuffer
 static void render_display(int current_temp, int high_temp, int low_temp, WeatherIcon icon,
-                           int* precip_pct, int current_hour, int uv_current, int uv_high,
+                           int* precip_pct, int uv_current, int uv_high,
                            const char* age_str, int battery_percent) {
     // Clear framebuffer
     memset(framebuffer, 0xFF, EPD_WIDTH * EPD_HEIGHT / 2);
@@ -171,18 +162,18 @@ static void render_display(int current_temp, int high_temp, int low_temp, Weathe
     // --- Divider line ---
     epd_draw_hline(40, 265, 880, 0x80, framebuffer);
 
-    // --- Precipitation chart (half width, moved down for more room) ---
-    draw_precip_chart(40, 295, 440, 210, precip_pct, PRECIP_HOURS, current_hour, framebuffer);
+    // --- Precipitation chart (4:3 aspect ratio, title below) ---
+    draw_precip_chart(40, 270, 280, 210, precip_pct, PRECIP_HOURS, framebuffer);
 
     // --- UV Index (right half of lower section) ---
     draw_sun_small(570, 325, framebuffer);
-    int32_t uvlx = 600, uvly = 335;
+    int32_t uvlx = 608, uvly = 340;  // Positioned to center with sun icon with spacing
     writeln((GFXfont *)&FiraSans, "UV Index", &uvlx, &uvly, framebuffer);
 
-    // Horizontal UV meter
+    // Horizontal UV meter (same width as rain graph)
     int32_t meter_x = 560;
     int32_t meter_y = 375;
-    int32_t meter_w = 340;
+    int32_t meter_w = 280;  // Match rain graph width
     int32_t meter_h = 30;
     int32_t uv_max = 11;
 
@@ -208,7 +199,7 @@ static void render_display(int current_temp, int high_temp, int low_temp, Weathe
     snprintf(uv_hi_str, sizeof(uv_hi_str), "%d", uv_high);
 
     // Always show current UV (even if 0) at the left edge if no fill
-    int32_t nx = uv_current > 0 ? (meter_x + fill_w_now - 8) : (meter_x + 5);
+    int32_t nx = uv_current > 0 ? (meter_x + fill_w_now - 8) : (meter_x + 1);
     int32_t ny = meter_y + meter_h + 40;
     writeln((GFXfont *)&FiraSans, uv_now_str, &nx, &ny, framebuffer);
 
@@ -325,9 +316,6 @@ void setup()
     int uv_current = weather.valid ? weather.uv_current : 0;
     int uv_high = weather.valid ? weather.uv_high : 0;
 
-    // Parse current hour from timestamp for precipitation chart labels
-    int current_hour = weather.valid ? parse_hour_from_timestamp(weather.updated) : 0;
-
     // Read battery and calculate data age
     int battery_percent = read_battery_percent();
     const char* timestamp = weather.valid ? weather.updated : prev_weather.updated;
@@ -335,7 +323,7 @@ void setup()
     char age_str[16];
     format_data_age(age_minutes, age_str, sizeof(age_str));
 
-    render_display(current_temp, high_temp, low_temp, icon, precip_pct, current_hour,
+    render_display(current_temp, high_temp, low_temp, icon, precip_pct,
                    uv_current, uv_high, age_str, battery_percent);
 
     Serial.println("Weather display updated");
@@ -378,11 +366,8 @@ void loop()
     int uv_current = weather.valid ? weather.uv_current : prev_weather.uv_current;
     int uv_high = weather.valid ? weather.uv_high : prev_weather.uv_high;
 
-    // Parse current hour from timestamp for precipitation chart labels
-    const char* timestamp = weather.valid ? weather.updated : prev_weather.updated;
-    int current_hour = parse_hour_from_timestamp(timestamp);
-
     // Read battery and calculate data age
+    const char* timestamp = weather.valid ? weather.updated : prev_weather.updated;
     int battery_percent = read_battery_percent();
     int age_minutes = get_data_age_minutes(timestamp);
     char age_str[16];
@@ -408,7 +393,7 @@ void loop()
     Serial.println("Data changed - updating display");
 
     // Render display
-    render_display(current_temp, high_temp, low_temp, icon, precip_pct, current_hour,
+    render_display(current_temp, high_temp, low_temp, icon, precip_pct,
                    uv_current, uv_high, age_str, battery_percent);
 
     Serial.println("Weather display updated");
