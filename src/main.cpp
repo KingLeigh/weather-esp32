@@ -223,16 +223,19 @@ static void render_display(int current_temp, int high_temp, int low_temp, Weathe
         writeln((GFXfont *)&FiraSans, uv_hi_str, &hx, &hy, framebuffer);
     }
 
-    // --- Data age with battery icon (lower-right corner) ---
-    // Age is passed in as a formatted string (empty if <= 30 minutes)
-    int32_t ux = EPD_WIDTH - 170, uy = EPD_HEIGHT - 15;
+    // --- Battery icon and data age (lower-right corner) ---
+    // Battery icon is always in the corner, age shows to the left when stale
+    int32_t battery_x = EPD_WIDTH - 55;
+    int32_t battery_y = EPD_HEIGHT - 35;
 
-    // Battery icon to the left of age display (centered vertically)
-    draw_battery_icon(ux - 55, uy - 20, battery_percent, framebuffer);
+    // Battery icon in the corner
+    draw_battery_icon(battery_x, battery_y, battery_percent, framebuffer);
 
-    // Only show age if string is not empty (> 30 minutes stale)
+    // Age to the left of battery (only if data is stale > 30 minutes)
     if (strlen(age_str) > 0) {
-        writeln((GFXfont *)&FiraSans, age_str, &ux, &uy, framebuffer);
+        int32_t age_x = battery_x - 80;  // Position age to the left of battery
+        int32_t age_y = EPD_HEIGHT - 15;
+        writeln((GFXfont *)&FiraSans, age_str, &age_x, &age_y, framebuffer);
     }
 
     // Push to display
