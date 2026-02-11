@@ -17,7 +17,23 @@
 uint8_t *framebuffer = NULL;
 uint32_t vref = 1100;  // ADC reference voltage
 
-#define UPDATE_INTERVAL_SECONDS 60  // Update every 60 seconds
+// ========== POWER MODE CONFIGURATION ==========
+// Toggle between development and production mode
+//
+// DEVELOPMENT MODE (false):
+//   - Updates every 60 seconds
+//   - Stays awake in loop()
+//   - Good for testing and debugging
+//
+// PRODUCTION MODE (true):
+//   - Updates once, then deep sleeps for 5 minutes
+//   - Saves battery power
+//   - Wakes up, updates display, sleeps again
+//
+#define ENABLE_DEEP_SLEEP false  // Set to true for battery-powered operation
+
+#define UPDATE_INTERVAL_SECONDS 300    // Development mode: update interval (5 minutes)
+#define DEEP_SLEEP_MINUTES 5            // Production mode: sleep duration
 
 // Track previous weather data to detect changes
 WeatherData prev_weather;
