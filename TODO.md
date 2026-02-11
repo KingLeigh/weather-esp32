@@ -17,11 +17,13 @@
   - May provide better use of screen real estate
 
 ## Time & Clock Features
-- [ ] **NTP time synchronization and clock display** - Add real-time clock to the display
-  - Sync time via NTP during WiFi connection (happens every 5 minutes)
-  - Maintain time between updates using ESP32 RTC
-  - Display current time in addition to (or instead of) "last updated" timestamp
-  - Could enable time-based features like automatic night mode based on actual time
+- [x] **NTP time synchronization** - Sync time via NTP to calculate data freshness
+  - NTP syncs during WiFi connection (every 5 minutes)
+  - POSIX timezone string handles EST/EDT automatically
+  - Data age shown only when stale (> 30 minutes)
+- [ ] **Clock display** - Show current time on the display
+  - NTP infrastructure is already in place
+  - Add a visible clock element to the layout
 
 ## Visual Updates
 - [ ] **UV Index icon update** - Replace small primitive sun with better design
