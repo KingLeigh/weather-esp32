@@ -16,6 +16,13 @@
   - Redesign layout for 540x960 (landscape)
   - May provide better use of screen real estate
 
+## Time & Clock Features
+- [ ] **NTP time synchronization and clock display** - Add real-time clock to the display
+  - Sync time via NTP during WiFi connection (happens every 5 minutes)
+  - Maintain time between updates using ESP32 RTC
+  - Display current time in addition to (or instead of) "last updated" timestamp
+  - Could enable time-based features like automatic night mode based on actual time
+
 ## Visual Updates
 - [ ] **UV Index icon update** - Replace small primitive sun with better design
   - Currently uses simple circle with rays
