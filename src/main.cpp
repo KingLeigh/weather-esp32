@@ -23,6 +23,7 @@ uint32_t vref = 1100;  // ADC reference voltage
 // Track previous weather data to detect changes
 WeatherData prev_weather;
 int prev_battery_percent = -1;
+int prev_age_minutes = -1;  // Track previous age for change detection
 int consecutive_failures = 0;  // Track how many updates failed in a row
 
 // Parse hour from ISO timestamp (e.g., "2025-01-15T14:30:00" -> 14)
@@ -59,11 +60,10 @@ static time_t parse_timestamp_to_epoch(const char* timestamp) {
     return 0;  // Failed to parse
 }
 
-// Calculate data age and format as string (e.g., "5m" or "1h 23m")
-static void format_data_age(const char* timestamp, char* output, size_t output_size) {
+// Calculate data age in minutes (returns -1 if invalid)
+static int get_data_age_minutes(const char* timestamp) {
     if (!timestamp || strlen(timestamp) == 0) {
-        strncpy(output, "--", output_size);
-        return;
+        return -1;
     }
 
     // Get current time
@@ -74,29 +74,40 @@ static void format_data_age(const char* timestamp, char* output, size_t output_s
     time_t data_time = parse_timestamp_to_epoch(timestamp);
 
     if (data_time == 0 || now == 0) {
-        // Time not synced yet or parse failed
-        strncpy(output, "??", output_size);
-        return;
+        return -1;  // Time not synced yet or parse failed
     }
 
     // Calculate age in seconds
     int age_seconds = (int)difftime(now, data_time);
 
     if (age_seconds < 0) {
-        // Clock skew - data timestamp is in the future
-        strncpy(output, "0m", output_size);
+        return 0;  // Clock skew - data timestamp is in the future
+    }
+
+    return age_seconds / 60;  // Return age in minutes
+}
+
+// Format age as string (e.g., "35m" or "1h 23m") - only if > 30 minutes
+static void format_data_age(int age_minutes, char* output, size_t output_size) {
+    if (age_minutes < 0) {
+        // Invalid/unknown age - don't show anything
+        output[0] = '\0';
         return;
     }
 
-    int age_minutes = age_seconds / 60;
+    if (age_minutes <= 30) {
+        // Fresh data - don't show age
+        output[0] = '\0';
+        return;
+    }
+
+    // Stale data (> 30 minutes) - show age
     int age_hours = age_minutes / 60;
     int remaining_minutes = age_minutes % 60;
 
     if (age_hours > 0) {
-        // Show hours and minutes (e.g., "1h 23m")
         snprintf(output, output_size, "%dh %dm", age_hours, remaining_minutes);
     } else {
-        // Show just minutes (e.g., "5m")
         snprintf(output, output_size, "%dm", age_minutes);
     }
 }
@@ -137,7 +148,7 @@ static void draw_battery_icon(int32_t x, int32_t y, int percent, uint8_t *fb) {
 // Render all display elements to framebuffer
 static void render_display(int current_temp, int high_temp, int low_temp, WeatherIcon icon,
                            int* precip_pct, int current_hour, int uv_current, int uv_high,
-                           const char* timestamp, int battery_percent) {
+                           const char* age_str, int battery_percent) {
     // Clear framebuffer
     memset(framebuffer, 0xFF, EPD_WIDTH * EPD_HEIGHT / 2);
 
@@ -213,14 +224,16 @@ static void render_display(int current_temp, int high_temp, int low_temp, Weathe
     }
 
     // --- Data age with battery icon (lower-right corner) ---
-    char age_str[16];
-    format_data_age(timestamp, age_str, sizeof(age_str));
+    // Age is passed in as a formatted string (empty if <= 30 minutes)
     int32_t ux = EPD_WIDTH - 170, uy = EPD_HEIGHT - 15;
 
     // Battery icon to the left of age display (centered vertically)
     draw_battery_icon(ux - 55, uy - 20, battery_percent, framebuffer);
 
-    writeln((GFXfont *)&FiraSans, age_str, &ux, &uy, framebuffer);
+    // Only show age if string is not empty (> 30 minutes stale)
+    if (strlen(age_str) > 0) {
+        writeln((GFXfont *)&FiraSans, age_str, &ux, &uy, framebuffer);
+    }
 
     // Push to display
     epd_poweron();
@@ -319,11 +332,15 @@ void setup()
     // Parse current hour from timestamp for precipitation chart labels
     int current_hour = weather.valid ? parse_hour_from_timestamp(weather.updated) : 0;
 
-    // Read battery and render display
+    // Read battery and calculate data age
     int battery_percent = read_battery_percent();
-    const char* timestamp_for_display = weather.valid ? weather.updated : prev_weather.updated;
+    const char* timestamp = weather.valid ? weather.updated : prev_weather.updated;
+    int age_minutes = get_data_age_minutes(timestamp);
+    char age_str[16];
+    format_data_age(age_minutes, age_str, sizeof(age_str));
+
     render_display(current_temp, high_temp, low_temp, icon, precip_pct, current_hour,
-                   uv_current, uv_high, timestamp_for_display, battery_percent);
+                   uv_current, uv_high, age_str, battery_percent);
 
     Serial.println("Weather display updated");
     Serial.printf("Next update in %d seconds...\n\n", UPDATE_INTERVAL_SECONDS);
@@ -331,6 +348,7 @@ void setup()
     // Save current weather data for change detection
     prev_weather = weather;
     prev_battery_percent = battery_percent;
+    prev_age_minutes = age_minutes;
 }
 
 void loop()
@@ -371,22 +389,34 @@ void loop()
     const char* timestamp = weather.valid ? weather.updated : prev_weather.updated;
     int current_hour = parse_hour_from_timestamp(timestamp);
 
-    // Read battery and check for changes
+    // Read battery and calculate data age
     int battery_percent = read_battery_percent();
-    bool data_changed = weather_data_changed(&prev_weather, &weather, prev_battery_percent, battery_percent);
+    int age_minutes = get_data_age_minutes(timestamp);
+    char age_str[16];
+    format_data_age(age_minutes, age_str, sizeof(age_str));
 
-    if (!data_changed) {
+    // Check if we should update the display
+    bool data_changed = weather_data_changed(&prev_weather, &weather, prev_battery_percent, battery_percent);
+    bool prev_showing_age = (prev_age_minutes > 30);
+    bool now_showing_age = (age_minutes > 30);
+    bool age_display_changed = (prev_showing_age != now_showing_age);
+    bool should_update = data_changed || age_display_changed;
+
+    if (!should_update) {
         Serial.println("No changes detected - skipping display update");
         Serial.printf("Next update in %d seconds...\n\n", UPDATE_INTERVAL_SECONDS);
-        return;  // Skip display update
+        // Still save state even if not updating display
+        prev_weather = weather;
+        prev_battery_percent = battery_percent;
+        prev_age_minutes = age_minutes;
+        return;
     }
 
     Serial.println("Data changed - updating display");
 
     // Render display
-    const char* timestamp_for_display = weather.valid ? weather.updated : prev_weather.updated;
     render_display(current_temp, high_temp, low_temp, icon, precip_pct, current_hour,
-                   uv_current, uv_high, timestamp_for_display, battery_percent);
+                   uv_current, uv_high, age_str, battery_percent);
 
     Serial.println("Weather display updated");
     Serial.printf("Next update in %d seconds...\n\n", UPDATE_INTERVAL_SECONDS);
@@ -394,4 +424,5 @@ void loop()
     // Save current weather data for next comparison
     prev_weather = weather;
     prev_battery_percent = battery_percent;
+    prev_age_minutes = age_minutes;
 }

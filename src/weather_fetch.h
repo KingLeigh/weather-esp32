@@ -81,9 +81,9 @@ bool connectWiFi() {
         Serial.printf("Signal: %d dBm\n", WiFi.RSSI());
 
         // Configure NTP for time synchronization
-        // GMT offset: 0 (UTC), daylight offset: 0, NTP server: pool.ntp.org
-        configTime(0, 0, "pool.ntp.org", "time.nist.gov");
-        Serial.println("NTP time sync initiated");
+        // Use EST timezone (GMT-5, with DST)
+        configTime(-5 * 3600, 3600, "pool.ntp.org", "time.nist.gov");
+        Serial.println("NTP time sync initiated (EST/EDT)");
 
         return true;
     } else {
