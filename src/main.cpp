@@ -159,13 +159,31 @@ static void render_display(int current_temp, int high_temp, int low_temp, Weathe
     int32_t lx = hx + 30, ly = 215;
     writeln((GFXfont *)&FiraSansMedium, lo_str, &lx, &ly, framebuffer);
 
+    // --- UV Index (beside H/L temps on same line) ---
+    draw_sun_small(lx + 80, 197, framebuffer);
+    char uv_str[16];
+    snprintf(uv_str, sizeof(uv_str), " %d / %d", uv_current, uv_high);
+    int32_t uvx = lx + 107, uvy = 212;  // Positioned after L: temp
+    writeln((GFXfont *)&FiraSans, uv_str, &uvx, &uvy, framebuffer);
+
     // --- Divider line ---
     epd_draw_hline(40, 265, 880, 0x80, framebuffer);
 
     // --- Precipitation chart (4:3 aspect ratio, title below) ---
     draw_precip_chart(40, 270, 280, 210, precip_pct, PRECIP_HOURS, framebuffer);
 
+    /* OLD UV INDEX POSITION (lower-right section) - kept for potential reversion
     // --- UV Index (right half of lower section) ---
+    // Simpler version: sun icon + "current / max" text
+    draw_sun_small(570, 350, framebuffer);
+
+    char uv_str[16];
+    snprintf(uv_str, sizeof(uv_str), " %d / %d", uv_current, uv_high);
+    int32_t uvx = 602, uvy = 365;
+    writeln((GFXfont *)&FiraSans, uv_str, &uvx, &uvy, framebuffer);
+    END OLD UV INDEX POSITION */
+
+    /* OLD UV INDEX DISPLAY (with bar) - kept for potential reversion
     draw_sun_small(570, 325, framebuffer);
     int32_t uvlx = 608, uvly = 340;  // Positioned to center with sun icon with spacing
     writeln((GFXfont *)&FiraSans, "UV Index", &uvlx, &uvly, framebuffer);
@@ -209,13 +227,13 @@ static void render_display(int current_temp, int high_temp, int low_temp, Weathe
         int32_t hy = meter_y + meter_h + 40;
         writeln((GFXfont *)&FiraSans, uv_hi_str, &hx, &hy, framebuffer);
     }
+    END OLD UV INDEX DISPLAY */
 
     // --- Battery icon and data age (lower-right corner) ---
-    // Battery icon is always in the corner, age shows to the left when stale
     int32_t battery_x = EPD_WIDTH - 55;
     int32_t battery_y = EPD_HEIGHT - 35;
 
-    // Battery icon in the corner
+    // Show battery icon
     draw_battery_icon(battery_x, battery_y, battery_percent, framebuffer);
 
     // Age to the left of battery (only if data is stale > 30 minutes)
