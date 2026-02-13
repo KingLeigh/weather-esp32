@@ -51,6 +51,9 @@ export class WeatherAPIProvider extends WeatherProvider {
     const uvValues = hourly.map(h => h.uv);
     const uvHigh = Math.round(Math.max(...uvValues));
 
+    // Get moon data from astronomy
+    const astro = today.astro;
+
     return {
       temperature: {
         current: Math.round(current.temp_f),
@@ -62,6 +65,10 @@ export class WeatherAPIProvider extends WeatherProvider {
       uv: {
         current: Math.round(current.uv),
         high: uvHigh
+      },
+      moon: {
+        illumination: parseInt(astro.moon_illumination),
+        phase: astro.moon_phase
       },
       is_day: current.is_day === 1,
       // Return Eastern Time formatted as YYYY-MM-DDTHH:MM:SS
