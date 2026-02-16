@@ -107,7 +107,7 @@ bool connectWiFi() {
 }
 
 // Map weather string to WeatherIcon enum
-WeatherIcon parseWeatherIcon(const char* weather_str, bool is_day) {
+WeatherIcon parse_weather_icon(const char* weather_str, bool is_day) {
     // Clear night: show moon instead of sun
     if (strcmp(weather_str, "sunny") == 0) {
         return is_day ? SUNNY : MOON;
@@ -170,7 +170,7 @@ bool fetchWeatherData(WeatherData* data) {
 
             const char* weather_str = doc["weather"] | "partly_cloudy";
             data->is_day = doc["is_day"] | true;  // Default to day if not present
-            data->weather = parseWeatherIcon(weather_str, data->is_day);
+            data->weather = parse_weather_icon(weather_str, data->is_day);
 
             // Precipitation array
             JsonArray precip_array = doc["precipitation"];

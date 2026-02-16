@@ -182,7 +182,7 @@ static void render_display(const WeatherData* weather, const char* age_str, int 
     writeln((GFXfont *)&FiraSansLarge, temp_str, &cx, &cy, framebuffer);
 
     // --- UV Index (on same line as temperature) ---
-    draw_sun_small(cx + 70, cy - 30, framebuffer);
+    draw_uv_icon(cx + 70, cy - 30, framebuffer);
 
     char uv_current_str[4];
     snprintf(uv_current_str, sizeof(uv_current_str), "%d", weather->uv_current);

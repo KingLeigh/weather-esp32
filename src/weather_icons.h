@@ -36,7 +36,7 @@ enum WeatherIcon {
 };
 
 // Small sun icon for UV index panel - hollow center with heavier rays
-static void draw_sun_small(int32_t cx, int32_t cy, uint8_t *fb) {
+static void draw_uv_icon(int32_t cx, int32_t cy, uint8_t *fb) {
     int32_t r = 14;
     uint8_t color = 0x50;  // soft gray
 
