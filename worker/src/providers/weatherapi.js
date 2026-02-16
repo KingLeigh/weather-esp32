@@ -32,11 +32,13 @@ export class WeatherAPIProvider extends WeatherProvider {
     const currentHour = now.getHours();
 
     // Extract 12 hours of precipitation data starting from current hour
+    // Use max of rain or snow chance to capture all precipitation types
     const precipitation = [];
     for (let i = 0; i < 12; i++) {
       const hourIndex = (currentHour + i) % 24;
       const hourData = hourly[hourIndex];
-      precipitation.push(hourData.chance_of_rain);
+      const precipChance = Math.max(hourData.chance_of_rain || 0, hourData.chance_of_snow || 0);
+      precipitation.push(precipChance);
     }
 
     // Map weather condition to our icon types
