@@ -22,6 +22,7 @@ struct WeatherData {
     char precip_type[8];  // "rain", "snow", or "mixed"
     int uv_current;
     int uv_high;
+    char moon_phase[32];  // e.g., "Full Moon", "Waxing Crescent"
     char updated[32];
     bool is_day;
     bool valid;
@@ -182,6 +183,11 @@ bool fetchWeatherData(WeatherData* data) {
 
             data->uv_current = doc["uv"]["current"] | 0;
             data->uv_high = doc["uv"]["high"] | 0;
+
+            // Moon phase
+            const char* moon_phase_str = doc["moon"]["phase"] | "Full Moon";
+            strncpy(data->moon_phase, moon_phase_str, sizeof(data->moon_phase) - 1);
+            data->moon_phase[sizeof(data->moon_phase) - 1] = '\0';
 
             const char* updated_str = doc["updated"] | "";
             strncpy(data->updated, updated_str, sizeof(data->updated) - 1);

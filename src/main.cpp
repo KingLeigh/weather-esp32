@@ -13,6 +13,7 @@
 #include "weather_icons.h"
 #include "precip_chart.h"
 #include "weather_fetch.h"
+#include "moon_phase_bitmaps.h"
 
 uint8_t *framebuffer = NULL;
 uint32_t vref = 1100;  // ADC reference voltage
@@ -116,6 +117,49 @@ static int read_battery_percent() {
     return battery_percent;
 }
 
+// Map moon phase string to bitmap
+static const uint8_t* get_moon_phase_bitmap(const char* phase) {
+    if (strcmp(phase, "New Moon") == 0) {
+        return moon_1_new_100;
+    } else if (strcmp(phase, "Waxing Crescent") == 0) {
+        return moon_2_crescent_100;
+    } else if (strcmp(phase, "First Quarter") == 0) {
+        return moon_3_quarter_100;
+    } else if (strcmp(phase, "Waxing Gibbous") == 0) {
+        return moon_4_gibbous_100;
+    } else if (strcmp(phase, "Full Moon") == 0) {
+        return moon_5_full_100;
+    } else if (strcmp(phase, "Waning Gibbous") == 0) {
+        return moon_6_gibbous_100;
+    } else if (strcmp(phase, "Last Quarter") == 0 || strcmp(phase, "Third Quarter") == 0) {
+        return moon_7_quarter_100;
+    } else if (strcmp(phase, "Waning Crescent") == 0) {
+        return moon_8_crescent_100;
+    }
+    // Default to full moon if unknown phase
+    return moon_5_full_100;
+}
+
+// Draw a moon phase icon (100x100 bitmap)
+static void draw_moon_icon(const uint8_t* bitmap, int32_t cx, int32_t cy, uint8_t *fb) {
+    const int32_t size = 100;  // Moon icons are 100x100
+    int32_t x = cx - size / 2;  // Top-left corner
+    int32_t y = cy - size / 2;
+
+    // Copy bitmap data into framebuffer (same pattern as weather icons)
+    for (int row = 0; row < size; row++) {
+        for (int col = 0; col < size / 2; col++) {
+            int fb_x = x + col * 2;
+            int fb_y = y + row;
+            if (fb_x >= 0 && fb_x < EPD_WIDTH - 1 && fb_y >= 0 && fb_y < EPD_HEIGHT) {
+                int fb_index = (fb_y * EPD_WIDTH + fb_x) / 2;
+                int bitmap_index = (row * size + col * 2) / 2;
+                fb[fb_index] = bitmap[bitmap_index];
+            }
+        }
+    }
+}
+
 // Draw battery icon with fill level
 static void draw_battery_icon(int32_t x, int32_t y, int percent, uint8_t *fb) {
     int32_t w = 40, h = 20, tip_w = 4;
@@ -135,7 +179,7 @@ static void draw_battery_icon(int32_t x, int32_t y, int percent, uint8_t *fb) {
 // Render all display elements to framebuffer
 static void render_display(int current_temp, int high_temp, int low_temp, WeatherIcon icon,
                            int* precip_pct, const char* precip_type, int uv_current, int uv_high,
-                           const char* age_str, int battery_percent) {
+                           const char* moon_phase, const char* age_str, int battery_percent) {
     // Clear framebuffer
     memset(framebuffer, 0xFF, EPD_WIDTH * EPD_HEIGHT / 2);
 
@@ -164,12 +208,9 @@ static void render_display(int current_temp, int high_temp, int low_temp, Weathe
     // --- Weather icon (top-right) ---
     draw_weather_icon(icon, 780, 122, 200, framebuffer);
 
-    // --- Test moon icon (centered in whitespace between L temp and weather icon) ---
-    int32_t moon_test_cx = 550;
-    int32_t moon_test_cy = 130;
-    epd_draw_circle(moon_test_cx, moon_test_cy, 30, 0x00, framebuffer);  // Outer circle
-    epd_draw_circle(moon_test_cx, moon_test_cy, 29, 0x00, framebuffer);  // Thicker outline
-    epd_draw_circle(moon_test_cx, moon_test_cy, 28, 0x00, framebuffer);
+    // --- Moon phase icon (to the right of precipitation chart) ---
+    const uint8_t* moon_bitmap = get_moon_phase_bitmap(moon_phase);
+    draw_moon_icon(moon_bitmap, 450, 375, framebuffer);
 
     // --- High / Low temps (medium font, below current temp) ---
     char hi_str[16], lo_str[16];
@@ -347,6 +388,9 @@ static bool weather_data_changed(const WeatherData* old_data, const WeatherData*
     if (old_data->uv_current != new_data->uv_current) return true;
     if (old_data->uv_high != new_data->uv_high) return true;
 
+    // Check moon phase
+    if (strcmp(old_data->moon_phase, new_data->moon_phase) != 0) return true;
+
     // Check precipitation array
     for (int i = 0; i < PRECIP_HOURS; i++) {
         if (old_data->precipitation[i] != new_data->precipitation[i]) return true;
@@ -408,6 +452,7 @@ void setup()
     const char* precip_type = weather.valid ? weather.precip_type : "rain";
     int uv_current = weather.valid ? weather.uv_current : 0;
     int uv_high = weather.valid ? weather.uv_high : 0;
+    const char* moon_phase = weather.valid ? weather.moon_phase : "Full Moon";
 
     // Read battery and calculate data age
     int battery_percent = read_battery_percent();
@@ -417,7 +462,7 @@ void setup()
     format_data_age(age_minutes, age_str, sizeof(age_str));
 
     render_display(current_temp, high_temp, low_temp, icon, precip_pct, precip_type,
-                   uv_current, uv_high, age_str, battery_percent);
+                   uv_current, uv_high, moon_phase, age_str, battery_percent);
 
     Serial.println("Weather display updated");
     Serial.printf("Next update in %d seconds...\n\n", UPDATE_INTERVAL_SECONDS);
@@ -459,6 +504,7 @@ void loop()
     const char* precip_type = weather.valid ? weather.precip_type : prev_weather.precip_type;
     int uv_current = weather.valid ? weather.uv_current : prev_weather.uv_current;
     int uv_high = weather.valid ? weather.uv_high : prev_weather.uv_high;
+    const char* moon_phase = weather.valid ? weather.moon_phase : prev_weather.moon_phase;
 
     // Read battery and calculate data age
     const char* timestamp = weather.valid ? weather.updated : prev_weather.updated;
@@ -488,7 +534,7 @@ void loop()
 
     // Render display
     render_display(current_temp, high_temp, low_temp, icon, precip_pct, precip_type,
-                   uv_current, uv_high, age_str, battery_percent);
+                   uv_current, uv_high, moon_phase, age_str, battery_percent);
 
     Serial.println("Weather display updated");
     Serial.printf("Next update in %d seconds...\n\n", UPDATE_INTERVAL_SECONDS);
