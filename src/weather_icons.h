@@ -91,17 +91,8 @@ static void draw_sunrise_icon(int32_t cx, int32_t cy, uint8_t *fb) {
 
 static void draw_weather_icon(WeatherIcon icon, int32_t cx, int32_t cy, int32_t size, uint8_t *fb) {
     // Icons are centered at cx, cy
-    // Top-left corner for bitmap rendering
     int32_t x = cx - ICON_SIZE / 2;
     int32_t y = cy - ICON_SIZE / 2;
-
-    // Create Rect_t for the icon area
-    Rect_t area = {
-        .x = x,
-        .y = y,
-        .width = ICON_SIZE,
-        .height = ICON_SIZE
-    };
 
     const uint8_t* bitmap = NULL;
 

@@ -18,7 +18,6 @@ static void draw_precip_chart(int32_t x, int32_t y, int32_t w, int32_t h,
     struct tm timeinfo;
     localtime_r(&now, &timeinfo);
     int current_hour = timeinfo.tm_hour;
-    // Use full height for chart since title is now below
     const int32_t chart_h = h;
     const int32_t chart_y = y;
     const int32_t chart_bottom = chart_y + chart_h;
