@@ -410,10 +410,15 @@ static bool weather_data_changed(const WeatherData* old_data, const WeatherData*
     // Check moon phase
     if (strcmp(old_data->moon_phase, new_data->moon_phase) != 0) return true;
 
-    // Check precipitation array
+    // Check precipitation array and type
+    if (strcmp(old_data->precip_type, new_data->precip_type) != 0) return true;
     for (int i = 0; i < PRECIP_HOURS; i++) {
         if (old_data->precipitation[i] != new_data->precipitation[i]) return true;
     }
+
+    // Check sunrise/sunset
+    if (strcmp(old_data->sunrise, new_data->sunrise) != 0) return true;
+    if (strcmp(old_data->sunset, new_data->sunset) != 0) return true;
 
     // Check battery (allow 10% tolerance to avoid flashing on minor voltage fluctuations)
     if (abs(old_battery - new_battery) > 10) return true;
