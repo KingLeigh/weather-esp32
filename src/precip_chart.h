@@ -34,7 +34,7 @@ static void draw_precip_chart(int32_t x, int32_t y, int32_t w, int32_t h,
 
     if (has_precip) {
         // Compute line points
-        int32_t px[12], py[12];
+        int32_t px[24], py[24];
         for (int i = 0; i < count; i++) {
             px[i] = x + (int32_t)((int64_t)i * w / (count - 1));
             py[i] = chart_bottom - (chart_h * data[i] / 100);
@@ -68,17 +68,17 @@ static void draw_precip_chart(int32_t x, int32_t y, int32_t w, int32_t h,
         // Note: writeln y-coordinate is the text BASELINE, text extends upward ~20px
         char title[16];
         if (strcmp(precip_type, "snow") == 0) {
-            strcpy(title, "Snow (12h)");
+            strcpy(title, "Snow");
         } else if (strcmp(precip_type, "mixed") == 0) {
-            strcpy(title, "Mixed (12h)");
+            strcpy(title, "Mixed");
         } else {
-            strcpy(title, "Rain (12h)");
+            strcpy(title, "Rain");
         }
 
-        // Center the text horizontally (with slight left adjustment)
+        // Center the text horizontally
         // FiraSans ~12px per character for more accurate centering
         int32_t text_width = strlen(title) * 12;
-        int32_t tx = x + (w - text_width) / 2 - text_width / 4;
+        int32_t tx = x + (w - text_width) / 2;
         // Position baseline below chart with spacing for text height + gap
         int32_t ty = chart_bottom + 45;  // 45px below chart bottom
         writeln((GFXfont *)&FiraSans, title, &tx, &ty, fb);

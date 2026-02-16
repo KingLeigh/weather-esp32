@@ -179,13 +179,14 @@ static void draw_battery_icon(int32_t x, int32_t y, int percent, uint8_t *fb) {
 // Render all display elements to framebuffer
 static void render_display(int current_temp, int high_temp, int low_temp, WeatherIcon icon,
                            int* precip_pct, const char* precip_type, int uv_current, int uv_high,
-                           const char* moon_phase, const char* age_str, int battery_percent) {
+                           const char* moon_phase, const char* sunrise, const char* sunset,
+                           const char* age_str, int battery_percent) {
     // Clear framebuffer
     memset(framebuffer, 0xFF, EPD_WIDTH * EPD_HEIGHT / 2);
 
     // === TEXT BLOCK: Current temp, UV, High/Low ===
     // Change these two values to move the entire block
-    int32_t base_x = 50, base_y = 130;
+    int32_t base_x = 330, base_y = 130;
 
     // --- Current temperature (large font) ---
     char temp_str[8];
@@ -220,12 +221,26 @@ static void render_display(int current_temp, int high_temp, int low_temp, Weathe
     int32_t lx = hx + 30, ly = base_y + 85;
     writeln((GFXfont *)&FiraSansMedium, lo_str, &lx, &ly, framebuffer);
 
-    // --- Weather icon (top-right) ---
-    draw_weather_icon(icon, 780, 122, 200, framebuffer);
+    // --- Weather icon (top-left) ---
+    draw_weather_icon(icon, 150, 130, 200, framebuffer);
 
-    // --- Moon phase icon (to the right of precipitation chart) ---
+    // --- Moon phase icon (top-right) ---
     const uint8_t* moon_bitmap = get_moon_phase_bitmap(moon_phase);
-    draw_moon_icon(moon_bitmap, 450, 375, framebuffer);
+    draw_moon_icon(moon_bitmap, 820, 130, framebuffer);
+
+    // --- Sunrise/Sunset times (lower right) ---
+    int32_t sun_x = 700;
+    int32_t sunrise_y = 380;
+    int32_t sunset_y = 428;
+
+    // Sunrise icon (sun on horizon) - centered above text
+    draw_sunrise_icon(sun_x + 85, sunrise_y - 48, framebuffer);
+
+    int32_t srx = sun_x, sry = sunrise_y;
+    writeln((GFXfont *)&FiraSans, sunrise, &srx, &sry, framebuffer);
+
+    int32_t ssx = sun_x, ssy = sunset_y;
+    writeln((GFXfont *)&FiraSans, sunset, &ssx, &ssy, framebuffer);
 
     /* CARD-BASED LAYOUT - didn't work out
     // --- Temperature Card (left) ---
@@ -288,8 +303,8 @@ static void render_display(int current_temp, int high_temp, int low_temp, Weathe
     // --- Divider line ---
     // epd_draw_hline(40, 265, 880, 0x80, framebuffer);  // Temporarily disabled
 
-    // --- Precipitation chart (4:3 aspect ratio, title below) ---
-    draw_precip_chart(40, 270, 280, 210, precip_pct, PRECIP_HOURS, precip_type, framebuffer);
+    // --- Precipitation chart (doubled width, 24 hours) ---
+    draw_precip_chart(40, 270, 560, 210, precip_pct, PRECIP_HOURS, precip_type, framebuffer);
 
     /* OLD UV INDEX POSITION (lower-right section) - kept for potential reversion
     // --- UV Index (right half of lower section) ---
@@ -457,6 +472,8 @@ void setup()
     int uv_current = weather.valid ? weather.uv_current : 0;
     int uv_high = weather.valid ? weather.uv_high : 0;
     const char* moon_phase = weather.valid ? weather.moon_phase : "Full Moon";
+    const char* sunrise = weather.valid ? weather.sunrise : "6:00 AM";
+    const char* sunset = weather.valid ? weather.sunset : "6:00 PM";
 
     // Read battery and calculate data age
     int battery_percent = read_battery_percent();
@@ -466,7 +483,7 @@ void setup()
     format_data_age(age_minutes, age_str, sizeof(age_str));
 
     render_display(current_temp, high_temp, low_temp, icon, precip_pct, precip_type,
-                   uv_current, uv_high, moon_phase, age_str, battery_percent);
+                   uv_current, uv_high, moon_phase, sunrise, sunset, age_str, battery_percent);
 
     Serial.println("Weather display updated");
     Serial.printf("Next update in %d seconds...\n\n", UPDATE_INTERVAL_SECONDS);
@@ -509,6 +526,8 @@ void loop()
     int uv_current = weather.valid ? weather.uv_current : prev_weather.uv_current;
     int uv_high = weather.valid ? weather.uv_high : prev_weather.uv_high;
     const char* moon_phase = weather.valid ? weather.moon_phase : prev_weather.moon_phase;
+    const char* sunrise = weather.valid ? weather.sunrise : prev_weather.sunrise;
+    const char* sunset = weather.valid ? weather.sunset : prev_weather.sunset;
 
     // Read battery and calculate data age
     const char* timestamp = weather.valid ? weather.updated : prev_weather.updated;
@@ -538,7 +557,7 @@ void loop()
 
     // Render display
     render_display(current_temp, high_temp, low_temp, icon, precip_pct, precip_type,
-                   uv_current, uv_high, moon_phase, age_str, battery_percent);
+                   uv_current, uv_high, moon_phase, sunrise, sunset, age_str, battery_percent);
 
     Serial.println("Weather display updated");
     Serial.printf("Next update in %d seconds...\n\n", UPDATE_INTERVAL_SECONDS);

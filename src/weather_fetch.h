@@ -10,7 +10,7 @@
 #include "wifi_config.h"
 #include "weather_icons.h"
 
-#define PRECIP_HOURS 12  // Number of hourly precipitation data points
+#define PRECIP_HOURS 24  // Number of hourly precipitation data points
 
 // Weather data structure
 struct WeatherData {
@@ -23,6 +23,8 @@ struct WeatherData {
     int uv_current;
     int uv_high;
     char moon_phase[32];  // e.g., "Full Moon", "Waxing Crescent"
+    char sunrise[16];     // e.g., "06:45 AM"
+    char sunset[16];      // e.g., "05:30 PM"
     char updated[32];
     bool is_day;
     bool valid;
@@ -188,6 +190,15 @@ bool fetchWeatherData(WeatherData* data) {
             const char* moon_phase_str = doc["moon"]["phase"] | "Full Moon";
             strncpy(data->moon_phase, moon_phase_str, sizeof(data->moon_phase) - 1);
             data->moon_phase[sizeof(data->moon_phase) - 1] = '\0';
+
+            // Sun times
+            const char* sunrise_str = doc["sun"]["sunrise"] | "6:00 AM";
+            strncpy(data->sunrise, sunrise_str, sizeof(data->sunrise) - 1);
+            data->sunrise[sizeof(data->sunrise) - 1] = '\0';
+
+            const char* sunset_str = doc["sun"]["sunset"] | "6:00 PM";
+            strncpy(data->sunset, sunset_str, sizeof(data->sunset) - 1);
+            data->sunset[sizeof(data->sunset) - 1] = '\0';
 
             const char* updated_str = doc["updated"] | "";
             strncpy(data->updated, updated_str, sizeof(data->updated) - 1);

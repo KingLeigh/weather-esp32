@@ -31,13 +31,13 @@ export class WeatherAPIProvider extends WeatherProvider {
     const now = new Date();
     const currentHour = now.getHours();
 
-    // Extract 12 hours of precipitation data starting from current hour
+    // Extract 24 hours of precipitation data starting from current hour
     // Use max of rain or snow chance to capture all precipitation types
     const precipitation = [];
     let totalRain = 0;
     let totalSnow = 0;
 
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < 24; i++) {
       const hourIndex = (currentHour + i) % 24;
       const hourData = hourly[hourIndex];
       const rainChance = hourData.chance_of_rain || 0;
