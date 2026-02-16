@@ -3,6 +3,24 @@
 #include "epd_driver.h"
 #include "firasans.h"
 
+// Draw a dotted vertical time marker line on a chart
+// target_hour: the hour of day to mark (0=midnight, 6=6am, 12=noon, 18=6pm)
+// thickness: number of parallel lines (1=thin, 3=thick)
+static void draw_time_marker(int target_hour, int current_hour, int count,
+                              int32_t chart_x, int32_t chart_w, int32_t chart_y, int32_t chart_bottom,
+                              uint8_t color, int thickness, uint8_t *fb) {
+    int hours_offset = (target_hour - current_hour + 24) % 24;
+    if (hours_offset == 0 || hours_offset >= count) return;
+
+    int32_t marker_x = chart_x + (int32_t)((int64_t)hours_offset * chart_w / (count - 1));
+    int offset = thickness / 2;
+    for (int32_t dy = chart_y; dy < chart_bottom; dy += 8) {
+        for (int i = -offset; i <= offset; i++) {
+            epd_draw_vline(marker_x + i, dy, 5, color, fb);
+        }
+    }
+}
+
 // Draw a precipitation probability time series line chart
 // x, y: top-left corner of chart area
 // w, h: width and height of chart area
@@ -91,47 +109,11 @@ static void draw_precip_chart(int32_t x, int32_t y, int32_t w, int32_t h,
     }
     // else: no precipitation - show empty graph with gridlines only (no label)
 
-    // Draw dotted vertical line at midnight (if within 24hr window)
-    // Draw on top of all other elements so it's always visible
-    int hours_until_midnight = (24 - current_hour) % 24;
-    if (hours_until_midnight > 0 && hours_until_midnight < count) {
-        int32_t midnight_x = x + (int32_t)((int64_t)hours_until_midnight * w / (count - 1));
-        // Draw thicker, darker dotted line (3 pixels wide)
-        for (int32_t dy = chart_y; dy < chart_bottom; dy += 8) {
-            epd_draw_vline(midnight_x - 1, dy, 5, 0x40, fb);  // Left line (darker gray)
-            epd_draw_vline(midnight_x, dy, 5, 0x40, fb);      // Center line
-            epd_draw_vline(midnight_x + 1, dy, 5, 0x40, fb);  // Right line
-        }
-    }
-
-    // Draw dotted vertical line at noon (if within 24hr window)
-    int hours_until_noon = (12 - current_hour + 24) % 24;
-    if (hours_until_noon > 0 && hours_until_noon < count) {
-        int32_t noon_x = x + (int32_t)((int64_t)hours_until_noon * w / (count - 1));
-        // Draw thicker, darker dotted line (3 pixels wide)
-        for (int32_t dy = chart_y; dy < chart_bottom; dy += 8) {
-            epd_draw_vline(noon_x - 1, dy, 5, 0x40, fb);  // Left line (darker gray)
-            epd_draw_vline(noon_x, dy, 5, 0x40, fb);      // Center line
-            epd_draw_vline(noon_x + 1, dy, 5, 0x40, fb);  // Right line
-        }
-    }
-
-    // Draw lighter dotted vertical lines at 6am and 6pm (if within 24hr window)
-    int hours_until_6am = (6 - current_hour + 24) % 24;
-    if (hours_until_6am > 0 && hours_until_6am < count) {
-        int32_t am6_x = x + (int32_t)((int64_t)hours_until_6am * w / (count - 1));
-        // Draw lighter, thinner dotted line (1 pixel wide)
-        for (int32_t dy = chart_y; dy < chart_bottom; dy += 8) {
-            epd_draw_vline(am6_x, dy, 5, 0x60, fb);  // Medium-light gray
-        }
-    }
-
-    int hours_until_6pm = (18 - current_hour + 24) % 24;
-    if (hours_until_6pm > 0 && hours_until_6pm < count) {
-        int32_t pm6_x = x + (int32_t)((int64_t)hours_until_6pm * w / (count - 1));
-        // Draw lighter, thinner dotted line (1 pixel wide)
-        for (int32_t dy = chart_y; dy < chart_bottom; dy += 8) {
-            epd_draw_vline(pm6_x, dy, 5, 0x60, fb);  // Medium-light gray
-        }
-    }
+    // Time marker lines (drawn on top of all chart elements)
+    // Major markers: midnight and noon (thick, dark)
+    draw_time_marker(0,  current_hour, count, x, w, chart_y, chart_bottom, 0x40, 3, fb);
+    draw_time_marker(12, current_hour, count, x, w, chart_y, chart_bottom, 0x40, 3, fb);
+    // Minor markers: 6am and 6pm (thin, lighter)
+    draw_time_marker(6,  current_hour, count, x, w, chart_y, chart_bottom, 0x60, 1, fb);
+    draw_time_marker(18, current_hour, count, x, w, chart_y, chart_bottom, 0x60, 1, fb);
 }
