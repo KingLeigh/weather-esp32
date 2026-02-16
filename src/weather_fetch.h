@@ -26,7 +26,6 @@ struct WeatherData {
     char sunrise[16];     // e.g., "06:45 AM"
     char sunset[16];      // e.g., "05:30 PM"
     char updated[32];
-    bool is_day;
     bool valid;
 };
 
@@ -169,8 +168,8 @@ bool fetchWeatherData(WeatherData* data) {
             data->temp_low = doc["temperature"]["low"] | 0;
 
             const char* weather_str = doc["weather"] | "partly_cloudy";
-            data->is_day = doc["is_day"] | true;  // Default to day if not present
-            data->weather = parse_weather_icon(weather_str, data->is_day);
+            bool is_day = doc["is_day"] | true;
+            data->weather = parse_weather_icon(weather_str, is_day);
 
             // Precipitation array
             JsonArray precip_array = doc["precipitation"];

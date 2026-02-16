@@ -36,9 +36,7 @@ static void draw_precip_chart(int32_t x, int32_t y, int32_t w, int32_t h,
     struct tm timeinfo;
     localtime_r(&now, &timeinfo);
     int current_hour = timeinfo.tm_hour;
-    const int32_t chart_h = h;
-    const int32_t chart_y = y;
-    const int32_t chart_bottom = chart_y + chart_h;
+    const int32_t chart_bottom = y + h;
 
     // Check if there's any precipitation
     bool has_precip = false;
@@ -51,17 +49,19 @@ static void draw_precip_chart(int32_t x, int32_t y, int32_t w, int32_t h,
 
     // Gridlines at 0%, 25%, 50%, 75% (no 100% line)
     for (int pct = 0; pct < 100; pct += 25) {
-        int32_t gy = chart_bottom - (chart_h * pct / 100);
+        int32_t gy = chart_bottom - (h * pct / 100);
         uint8_t color = (pct == 0) ? 0xA0 : 0xC0;
         epd_draw_hline(x, gy, w, color, fb);
     }
 
     if (has_precip) {
-        // Compute line points
-        int32_t px[24], py[24];
+        // Compute line points (cap to safe maximum)
+        #define MAX_CHART_POINTS 48
+        if (count > MAX_CHART_POINTS) count = MAX_CHART_POINTS;
+        int32_t px[MAX_CHART_POINTS], py[MAX_CHART_POINTS];
         for (int i = 0; i < count; i++) {
             px[i] = x + (int32_t)((int64_t)i * w / (count - 1));
-            py[i] = chart_bottom - (chart_h * data[i] / 100);
+            py[i] = chart_bottom - (h * data[i] / 100);
         }
 
         // Fill area under the line (column by column with light gray)
@@ -111,9 +111,9 @@ static void draw_precip_chart(int32_t x, int32_t y, int32_t w, int32_t h,
 
     // Time marker lines (drawn on top of all chart elements)
     // Major markers: midnight and noon (thick, dark)
-    draw_time_marker(0,  current_hour, count, x, w, chart_y, chart_bottom, 0x40, 3, fb);
-    draw_time_marker(12, current_hour, count, x, w, chart_y, chart_bottom, 0x40, 3, fb);
+    draw_time_marker(0,  current_hour, count, x, w, y, chart_bottom, 0x40, 3, fb);
+    draw_time_marker(12, current_hour, count, x, w, y, chart_bottom, 0x40, 3, fb);
     // Minor markers: 6am and 6pm (thin, lighter)
-    draw_time_marker(6,  current_hour, count, x, w, chart_y, chart_bottom, 0x60, 1, fb);
-    draw_time_marker(18, current_hour, count, x, w, chart_y, chart_bottom, 0x60, 1, fb);
+    draw_time_marker(6,  current_hour, count, x, w, y, chart_bottom, 0x60, 1, fb);
+    draw_time_marker(18, current_hour, count, x, w, y, chart_bottom, 0x60, 1, fb);
 }
