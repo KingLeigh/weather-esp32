@@ -183,10 +183,14 @@ static void render_display(int current_temp, int high_temp, int low_temp, Weathe
     // Clear framebuffer
     memset(framebuffer, 0xFF, EPD_WIDTH * EPD_HEIGHT / 2);
 
-    // --- Current temperature (large font, top-left) ---
+    // === TEXT BLOCK: Current temp, UV, High/Low ===
+    // Change these two values to move the entire block
+    int32_t base_x = 50, base_y = 130;
+
+    // --- Current temperature (large font) ---
     char temp_str[8];
     snprintf(temp_str, sizeof(temp_str), "%d\xC2\xB0", current_temp);
-    int32_t cx = 50, cy = 130;
+    int32_t cx = base_x, cy = base_y;
     writeln((GFXfont *)&FiraSansLarge, temp_str, &cx, &cy, framebuffer);
 
     // --- UV Index (on same line as temperature) ---
@@ -205,23 +209,23 @@ static void render_display(int current_temp, int high_temp, int low_temp, Weathe
     int32_t uvmx = uvcx + 10, uvmy = cy;  // Position after current UV
     writeln((GFXfont *)&FiraSansMedium, uv_max_str, &uvmx, &uvmy, framebuffer);
 
+    // --- High / Low temps (medium font, below current temp) ---
+    char hi_str[16], lo_str[16];
+    snprintf(hi_str, sizeof(hi_str), "H: %d\xC2\xB0", high_temp);
+    snprintf(lo_str, sizeof(lo_str), "L: %d\xC2\xB0", low_temp);
+
+    int32_t hx = base_x, hy = base_y + 85;  // 85 pixels below current temp baseline
+    writeln((GFXfont *)&FiraSansMedium, hi_str, &hx, &hy, framebuffer);
+
+    int32_t lx = hx + 30, ly = base_y + 85;
+    writeln((GFXfont *)&FiraSansMedium, lo_str, &lx, &ly, framebuffer);
+
     // --- Weather icon (top-right) ---
     draw_weather_icon(icon, 780, 122, 200, framebuffer);
 
     // --- Moon phase icon (to the right of precipitation chart) ---
     const uint8_t* moon_bitmap = get_moon_phase_bitmap(moon_phase);
     draw_moon_icon(moon_bitmap, 450, 375, framebuffer);
-
-    // --- High / Low temps (medium font, below current temp) ---
-    char hi_str[16], lo_str[16];
-    snprintf(hi_str, sizeof(hi_str), "H: %d\xC2\xB0", high_temp);
-    snprintf(lo_str, sizeof(lo_str), "L: %d\xC2\xB0", low_temp);
-
-    int32_t hx = 50, hy = 215;
-    writeln((GFXfont *)&FiraSansMedium, hi_str, &hx, &hy, framebuffer);
-
-    int32_t lx = hx + 30, ly = 215;
-    writeln((GFXfont *)&FiraSansMedium, lo_str, &lx, &ly, framebuffer);
 
     /* CARD-BASED LAYOUT - didn't work out
     // --- Temperature Card (left) ---
