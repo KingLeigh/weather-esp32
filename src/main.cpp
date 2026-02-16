@@ -145,6 +145,22 @@ static void render_display(int current_temp, int high_temp, int low_temp, Weathe
     int32_t cx = 50, cy = 130;
     writeln((GFXfont *)&FiraSansLarge, temp_str, &cx, &cy, framebuffer);
 
+    // --- UV Index (on same line as temperature) ---
+    // Sun icon + current (large) + max (medium): ☀2 3
+    draw_sun_small(cx + 70, cy - 30, framebuffer);  // Sun icon (centered with large text)
+
+    // Current UV in large font
+    char uv_current_str[4];
+    snprintf(uv_current_str, sizeof(uv_current_str), "%d", uv_current);
+    int32_t uvcx = cx + 105, uvcy = cy;
+    writeln((GFXfont *)&FiraSansLarge, uv_current_str, &uvcx, &uvcy, framebuffer);
+
+    // Max UV in medium font (positioned after current)
+    char uv_max_str[4];
+    snprintf(uv_max_str, sizeof(uv_max_str), "%d", uv_high);
+    int32_t uvmx = uvcx + 10, uvmy = cy;  // Position after current UV
+    writeln((GFXfont *)&FiraSansMedium, uv_max_str, &uvmx, &uvmy, framebuffer);
+
     // --- Weather icon (top-right) ---
     draw_weather_icon(icon, 780, 122, 200, framebuffer);
 
@@ -159,12 +175,63 @@ static void render_display(int current_temp, int high_temp, int low_temp, Weathe
     int32_t lx = hx + 30, ly = 215;
     writeln((GFXfont *)&FiraSansMedium, lo_str, &lx, &ly, framebuffer);
 
+    /* CARD-BASED LAYOUT - didn't work out
+    // --- Temperature Card (left) ---
+    int32_t temp_card_x = 40, temp_card_y = 30;
+    int32_t temp_card_w = 400, temp_card_h = 200;
+
+    // Card border (light gray)
+    epd_draw_rect(temp_card_x, temp_card_y, temp_card_w, temp_card_h, 0xB0, framebuffer);
+
+    // Current temp (large font, centered vertically)
+    char temp_str[8];
+    snprintf(temp_str, sizeof(temp_str), "%d\xC2\xB0", current_temp);
+    int32_t ctx = temp_card_x + 140, cty = temp_card_y + 95;
+    writeln((GFXfont *)&FiraSansLarge, temp_str, &ctx, &cty, framebuffer);
+
+    // H/L temps (medium font, centered at bottom)
+    char hi_str[16], lo_str[16];
+    snprintf(hi_str, sizeof(hi_str), "H: %d\xC2\xB0", high_temp);
+    snprintf(lo_str, sizeof(lo_str), "L: %d\xC2\xB0", low_temp);
+
+    int32_t hx = temp_card_x + 60, hy = temp_card_y + 180;
+    writeln((GFXfont *)&FiraSansMedium, hi_str, &hx, &hy, framebuffer);
+
+    int32_t lx = hx + 30, ly = temp_card_y + 180;
+    writeln((GFXfont *)&FiraSansMedium, lo_str, &lx, &ly, framebuffer);
+
+    // --- UV Card (right) ---
+    int32_t uv_card_x = 480, uv_card_y = 30;
+    int32_t uv_card_w = 300, uv_card_h = 200;
+
+    // Card border (light gray)
+    epd_draw_rect(uv_card_x, uv_card_y, uv_card_w, uv_card_h, 0xB0, framebuffer);
+
+    // Sun icon + current UV (large font, centered vertically)
+    draw_sun_small(uv_card_x + 95, uv_card_y + 70, framebuffer);
+    char uv_current_str[8];
+    snprintf(uv_current_str, sizeof(uv_current_str), "%d", uv_current);
+    int32_t uvcx = uv_card_x + 130, uvcy = uv_card_y + 85;
+    writeln((GFXfont *)&FiraSansLarge, uv_current_str, &uvcx, &uvcy, framebuffer);
+
+    // Max UV (medium font, at bottom)
+    char uv_max_str[16];
+    snprintf(uv_max_str, sizeof(uv_max_str), "Max: %d", uv_high);
+    int32_t uvmx = uv_card_x + 95, uvmy = uv_card_y + 180;
+    writeln((GFXfont *)&FiraSansMedium, uv_max_str, &uvmx, &uvmy, framebuffer);
+
+    // --- Weather icon (top-right) ---
+    draw_weather_icon(icon, 860, 130, 200, framebuffer);
+    END CARD-BASED LAYOUT */
+
+    /* OLD UV INDEX (beside H/L temps) - kept for potential reversion
     // --- UV Index (beside H/L temps on same line) ---
     draw_sun_small(lx + 80, 197, framebuffer);
     char uv_str[16];
     snprintf(uv_str, sizeof(uv_str), " %d / %d", uv_current, uv_high);
     int32_t uvx = lx + 107, uvy = 212;  // Positioned after L: temp
     writeln((GFXfont *)&FiraSans, uv_str, &uvx, &uvy, framebuffer);
+    END OLD UV INDEX */
 
     // --- Divider line ---
     epd_draw_hline(40, 265, 880, 0x80, framebuffer);
