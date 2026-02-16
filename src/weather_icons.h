@@ -2,7 +2,26 @@
 #include "epd_driver.h"
 #include "weather_icon_bitmaps.h"
 
-#define ICON_SIZE 200  // All icons are 200x200
+#define WEATHER_ICON_SIZE 200  // Weather icons are 200x200
+#define MOON_ICON_SIZE 100     // Moon phase icons are 100x100
+
+// Draw a 4-bit grayscale bitmap centered at (cx, cy)
+static void draw_bitmap(const uint8_t* bitmap, int32_t cx, int32_t cy, int32_t size, uint8_t *fb) {
+    int32_t x = cx - size / 2;
+    int32_t y = cy - size / 2;
+
+    for (int row = 0; row < size; row++) {
+        for (int col = 0; col < size / 2; col++) {
+            int fb_x = x + col * 2;
+            int fb_y = y + row;
+            if (fb_x >= 0 && fb_x < EPD_WIDTH - 1 && fb_y >= 0 && fb_y < EPD_HEIGHT) {
+                int fb_index = (fb_y * EPD_WIDTH + fb_x) / 2;
+                int bitmap_index = (row * size + col * 2) / 2;
+                fb[fb_index] = bitmap[bitmap_index];
+            }
+        }
+    }
+}
 
 enum WeatherIcon {
     SUNNY,
@@ -89,56 +108,22 @@ static void draw_sunrise_icon(int32_t cx, int32_t cy, uint8_t *fb) {
     epd_draw_hline(cx - outer - 2, cy - 1, (outer + 2) * 2, color, fb);
 }
 
-static void draw_weather_icon(WeatherIcon icon, int32_t cx, int32_t cy, int32_t size, uint8_t *fb) {
-    // Icons are centered at cx, cy
-    int32_t x = cx - ICON_SIZE / 2;
-    int32_t y = cy - ICON_SIZE / 2;
-
+static void draw_weather_icon(WeatherIcon icon, int32_t cx, int32_t cy, uint8_t *fb) {
     const uint8_t* bitmap = NULL;
 
     switch (icon) {
-        case SUNNY:
-            bitmap = icon_sun_200;
-            break;
-        case MOON:
-            bitmap = icon_moon_200;
-            break;
-        case CLOUDY:
-            bitmap = icon_cloud_200;
-            break;
-        case PARTLY_CLOUDY:
-            bitmap = icon_partly_200;
-            break;
-        case PARTLY_CLOUDY_NIGHT:
-            bitmap = icon_partly_night_200;
-            break;
-        case RAINY:
-            bitmap = icon_rainy_200;
-            break;
-        case SNOWY:
-            bitmap = icon_snowflake_200;
-            break;
-        case THUNDERSTORM:
-            bitmap = icon_lighting_200;
-            break;
-        case FOG:
-            bitmap = icon_fog_200;
-            break;
+        case SUNNY:            bitmap = icon_sun_200; break;
+        case MOON:             bitmap = icon_moon_200; break;
+        case CLOUDY:           bitmap = icon_cloud_200; break;
+        case PARTLY_CLOUDY:    bitmap = icon_partly_200; break;
+        case PARTLY_CLOUDY_NIGHT: bitmap = icon_partly_night_200; break;
+        case RAINY:            bitmap = icon_rainy_200; break;
+        case SNOWY:            bitmap = icon_snowflake_200; break;
+        case THUNDERSTORM:     bitmap = icon_lighting_200; break;
+        case FOG:              bitmap = icon_fog_200; break;
     }
 
     if (bitmap) {
-        // Copy bitmap data into the framebuffer
-        // The bitmap is already in the correct 4-bit format
-        for (int row = 0; row < ICON_SIZE; row++) {
-            for (int col = 0; col < ICON_SIZE / 2; col++) {
-                int fb_x = x + col * 2;
-                int fb_y = y + row;
-                if (fb_x >= 0 && fb_x < EPD_WIDTH - 1 && fb_y >= 0 && fb_y < EPD_HEIGHT) {
-                    int fb_index = (fb_y * EPD_WIDTH + fb_x) / 2;
-                    int bitmap_index = (row * ICON_SIZE + col * 2) / 2;
-                    fb[fb_index] = bitmap[bitmap_index];
-                }
-            }
-        }
+        draw_bitmap(bitmap, cx, cy, WEATHER_ICON_SIZE, fb);
     }
 }

@@ -140,26 +140,6 @@ static const uint8_t* get_moon_phase_bitmap(const char* phase) {
     return moon_5_full_100;
 }
 
-// Draw a moon phase icon (100x100 bitmap)
-static void draw_moon_icon(const uint8_t* bitmap, int32_t cx, int32_t cy, uint8_t *fb) {
-    const int32_t size = 100;  // Moon icons are 100x100
-    int32_t x = cx - size / 2;  // Top-left corner
-    int32_t y = cy - size / 2;
-
-    // Copy bitmap data into framebuffer (same pattern as weather icons)
-    for (int row = 0; row < size; row++) {
-        for (int col = 0; col < size / 2; col++) {
-            int fb_x = x + col * 2;
-            int fb_y = y + row;
-            if (fb_x >= 0 && fb_x < EPD_WIDTH - 1 && fb_y >= 0 && fb_y < EPD_HEIGHT) {
-                int fb_index = (fb_y * EPD_WIDTH + fb_x) / 2;
-                int bitmap_index = (row * size + col * 2) / 2;
-                fb[fb_index] = bitmap[bitmap_index];
-            }
-        }
-    }
-}
-
 // Draw battery icon with fill level
 static void draw_battery_icon(int32_t x, int32_t y, int percent, uint8_t *fb) {
     int32_t w = 40, h = 20, tip_w = 4;
@@ -222,11 +202,11 @@ static void render_display(int current_temp, int high_temp, int low_temp, Weathe
     writeln((GFXfont *)&FiraSansMedium, lo_str, &lx, &ly, framebuffer);
 
     // --- Weather icon (top-left) ---
-    draw_weather_icon(icon, 150, 130, 200, framebuffer);
+    draw_weather_icon(icon, 150, 130, framebuffer);
 
     // --- Moon phase icon (top-right) ---
     const uint8_t* moon_bitmap = get_moon_phase_bitmap(moon_phase);
-    draw_moon_icon(moon_bitmap, 820, 130, framebuffer);
+    draw_bitmap(moon_bitmap, 820, 130, MOON_ICON_SIZE, framebuffer);
 
     // --- Sunrise/Sunset times (lower right) ---
     int32_t sun_x = 700;
