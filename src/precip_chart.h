@@ -1,4 +1,5 @@
 #pragma once
+#include <time.h>
 #include "epd_driver.h"
 #include "firasans.h"
 
@@ -11,6 +12,12 @@
 // fb: framebuffer
 static void draw_precip_chart(int32_t x, int32_t y, int32_t w, int32_t h,
                                const int *data, int count, const char *precip_type, uint8_t *fb) {
+    // Get current hour to calculate midnight position
+    time_t now;
+    time(&now);
+    struct tm timeinfo;
+    localtime_r(&now, &timeinfo);
+    int current_hour = timeinfo.tm_hour;
     // Use full height for chart since title is now below
     const int32_t chart_h = h;
     const int32_t chart_y = y;
@@ -84,4 +91,48 @@ static void draw_precip_chart(int32_t x, int32_t y, int32_t w, int32_t h,
         writeln((GFXfont *)&FiraSans, title, &tx, &ty, fb);
     }
     // else: no precipitation - show empty graph with gridlines only (no label)
+
+    // Draw dotted vertical line at midnight (if within 24hr window)
+    // Draw on top of all other elements so it's always visible
+    int hours_until_midnight = (24 - current_hour) % 24;
+    if (hours_until_midnight > 0 && hours_until_midnight < count) {
+        int32_t midnight_x = x + (int32_t)((int64_t)hours_until_midnight * w / (count - 1));
+        // Draw thicker, darker dotted line (3 pixels wide)
+        for (int32_t dy = chart_y; dy < chart_bottom; dy += 8) {
+            epd_draw_vline(midnight_x - 1, dy, 5, 0x40, fb);  // Left line (darker gray)
+            epd_draw_vline(midnight_x, dy, 5, 0x40, fb);      // Center line
+            epd_draw_vline(midnight_x + 1, dy, 5, 0x40, fb);  // Right line
+        }
+    }
+
+    // Draw dotted vertical line at noon (if within 24hr window)
+    int hours_until_noon = (12 - current_hour + 24) % 24;
+    if (hours_until_noon > 0 && hours_until_noon < count) {
+        int32_t noon_x = x + (int32_t)((int64_t)hours_until_noon * w / (count - 1));
+        // Draw thicker, darker dotted line (3 pixels wide)
+        for (int32_t dy = chart_y; dy < chart_bottom; dy += 8) {
+            epd_draw_vline(noon_x - 1, dy, 5, 0x40, fb);  // Left line (darker gray)
+            epd_draw_vline(noon_x, dy, 5, 0x40, fb);      // Center line
+            epd_draw_vline(noon_x + 1, dy, 5, 0x40, fb);  // Right line
+        }
+    }
+
+    // Draw lighter dotted vertical lines at 6am and 6pm (if within 24hr window)
+    int hours_until_6am = (6 - current_hour + 24) % 24;
+    if (hours_until_6am > 0 && hours_until_6am < count) {
+        int32_t am6_x = x + (int32_t)((int64_t)hours_until_6am * w / (count - 1));
+        // Draw lighter, thinner dotted line (1 pixel wide)
+        for (int32_t dy = chart_y; dy < chart_bottom; dy += 8) {
+            epd_draw_vline(am6_x, dy, 5, 0x60, fb);  // Medium-light gray
+        }
+    }
+
+    int hours_until_6pm = (18 - current_hour + 24) % 24;
+    if (hours_until_6pm > 0 && hours_until_6pm < count) {
+        int32_t pm6_x = x + (int32_t)((int64_t)hours_until_6pm * w / (count - 1));
+        // Draw lighter, thinner dotted line (1 pixel wide)
+        for (int32_t dy = chart_y; dy < chart_bottom; dy += 8) {
+            epd_draw_vline(pm6_x, dy, 5, 0x60, fb);  // Medium-light gray
+        }
+    }
 }
