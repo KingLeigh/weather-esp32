@@ -2,6 +2,7 @@
 #include <time.h>
 #include "epd_driver.h"
 #include "firasans.h"
+#include "colors.h"
 
 // Draw a dotted vertical time marker line on a chart
 // target_hour: the hour of day to mark (0=midnight, 6=6am, 12=noon, 18=6pm)
@@ -50,7 +51,7 @@ static void draw_precip_chart(int32_t x, int32_t y, int32_t w, int32_t h,
     // Gridlines at 0%, 25%, 50%, 75% (no 100% line)
     for (int pct = 0; pct < 100; pct += 25) {
         int32_t gy = chart_bottom - (h * pct / 100);
-        uint8_t color = (pct == 0) ? 0xA0 : 0xC0;
+        uint8_t color = (pct == 0) ? COLOR_OUTLINE : COLOR_GRIDLINE;
         epd_draw_hline(x, gy, w, color, fb);
     }
 
@@ -76,16 +77,16 @@ static void draw_precip_chart(int32_t x, int32_t y, int32_t w, int32_t h,
                     top = y0 + (int32_t)((int64_t)(y1 - y0) * (col - x0) / (x1 - x0));
                 }
                 if (top < chart_bottom) {
-                    epd_draw_vline(col, top, chart_bottom - top, 0xD0, fb);
+                    epd_draw_vline(col, top, chart_bottom - top, COLOR_FILL, fb);
                 }
             }
         }
 
         // Draw the line segments
         for (int i = 0; i < count - 1; i++) {
-            epd_draw_line(px[i], py[i], px[i + 1], py[i + 1], 0x00, fb);
+            epd_draw_line(px[i], py[i], px[i + 1], py[i + 1], COLOR_BLACK, fb);
             // Thicken
-            epd_draw_line(px[i], py[i] + 1, px[i + 1], py[i + 1] + 1, 0x00, fb);
+            epd_draw_line(px[i], py[i] + 1, px[i + 1], py[i + 1] + 1, COLOR_BLACK, fb);
         }
 
         // Title (centered below chart) - dynamic based on precipitation type
@@ -111,9 +112,9 @@ static void draw_precip_chart(int32_t x, int32_t y, int32_t w, int32_t h,
 
     // Time marker lines (drawn on top of all chart elements)
     // Major markers: midnight and noon (thick, dark)
-    draw_time_marker(0,  current_hour, count, x, w, y, chart_bottom, 0x40, 3, fb);
-    draw_time_marker(12, current_hour, count, x, w, y, chart_bottom, 0x40, 3, fb);
+    draw_time_marker(0,  current_hour, count, x, w, y, chart_bottom, COLOR_DARK, 3, fb);
+    draw_time_marker(12, current_hour, count, x, w, y, chart_bottom, COLOR_DARK, 3, fb);
     // Minor markers: 6am and 6pm (thin, lighter)
-    draw_time_marker(6,  current_hour, count, x, w, y, chart_bottom, 0x60, 1, fb);
-    draw_time_marker(18, current_hour, count, x, w, y, chart_bottom, 0x60, 1, fb);
+    draw_time_marker(6,  current_hour, count, x, w, y, chart_bottom, COLOR_MEDIUM, 1, fb);
+    draw_time_marker(18, current_hour, count, x, w, y, chart_bottom, COLOR_MEDIUM, 1, fb);
 }

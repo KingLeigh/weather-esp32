@@ -145,14 +145,14 @@ static void draw_battery_icon(int32_t x, int32_t y, int percent, uint8_t *fb) {
     int32_t w = 40, h = 20, tip_w = 4;
 
     // Battery body outline
-    epd_draw_rect(x, y, w, h, 0xA0, fb);
+    epd_draw_rect(x, y, w, h, COLOR_OUTLINE, fb);
     // Battery tip
-    epd_fill_rect(x + w, y + 6, tip_w, h - 12, 0xA0, fb);
+    epd_fill_rect(x + w, y + 6, tip_w, h - 12, COLOR_OUTLINE, fb);
 
     // Fill level
     int32_t fill_w = (w - 2) * percent / 100;
     if (fill_w > 0) {
-        epd_fill_rect(x + 1, y + 1, fill_w, h - 2, 0x50, fb);
+        epd_fill_rect(x + 1, y + 1, fill_w, h - 2, COLOR_ICON, fb);
     }
 }
 
@@ -169,7 +169,7 @@ static void init_default_weather(WeatherData* data) {
 // Render all display elements to framebuffer
 static void render_display(const WeatherData* weather, const char* age_str, int battery_percent) {
     // Clear framebuffer
-    memset(framebuffer, 0xFF, EPD_WIDTH * EPD_HEIGHT / 2);
+    memset(framebuffer, COLOR_WHITE, EPD_WIDTH * EPD_HEIGHT / 2);
 
     // === TEXT BLOCK: Current temp, UV, High/Low ===
     // Change these two values to move the entire block
@@ -310,7 +310,7 @@ void setup()
         Serial.println("Failed to allocate framebuffer!");
         while (1);
     }
-    memset(framebuffer, 0xFF, EPD_WIDTH * EPD_HEIGHT / 2);
+    memset(framebuffer, COLOR_WHITE, EPD_WIDTH * EPD_HEIGHT / 2);
 
     epd_init();
 

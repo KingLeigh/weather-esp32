@@ -1,6 +1,7 @@
 #pragma once
 #include "epd_driver.h"
 #include "weather_icon_bitmaps.h"
+#include "colors.h"
 
 #define WEATHER_ICON_SIZE 200  // Weather icons are 200x200
 #define MOON_ICON_SIZE 100     // Moon phase icons are 100x100
@@ -38,7 +39,7 @@ enum WeatherIcon {
 // Small sun icon for UV index panel - hollow center with heavier rays
 static void draw_uv_icon(int32_t cx, int32_t cy, uint8_t *fb) {
     int32_t r = 14;
-    uint8_t color = 0x50;  // soft gray
+    uint8_t color = COLOR_ICON;
 
     // Draw hollow sun (outline only, not filled)
     epd_draw_circle(cx, cy, r, color, fb);
@@ -64,7 +65,7 @@ static void draw_uv_icon(int32_t cx, int32_t cy, uint8_t *fb) {
 // Sunrise icon - sun split by horizon (only top half visible)
 static void draw_sunrise_icon(int32_t cx, int32_t cy, uint8_t *fb) {
     int32_t r = 14;
-    uint8_t color = 0x50;  // soft gray
+    uint8_t color = COLOR_ICON;
 
     // Draw top half of sun (arc from 180° to 360°) - thicker with multiple arcs
     for (float angle = M_PI; angle <= 2 * M_PI; angle += 0.1) {
