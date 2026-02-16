@@ -139,14 +139,6 @@ static void render_display(int current_temp, int high_temp, int low_temp, Weathe
     // Clear framebuffer
     memset(framebuffer, 0xFF, EPD_WIDTH * EPD_HEIGHT / 2);
 
-    // Font properties for gray text (medium font elements)
-    FontProperties gray_props = {
-        .fg_color = 6,  // Gray (0x6 in 4-bit = medium gray)
-        .bg_color = 15, // White background
-        .fallback_glyph = 0,
-        .flags = 0
-    };
-
     // --- Current temperature (large font, top-left) ---
     char temp_str[8];
     snprintf(temp_str, sizeof(temp_str), "%d\xC2\xB0", current_temp);
@@ -163,25 +155,25 @@ static void render_display(int current_temp, int high_temp, int low_temp, Weathe
     int32_t uvcx = cx + 105, uvcy = cy;
     writeln((GFXfont *)&FiraSansLarge, uv_current_str, &uvcx, &uvcy, framebuffer);
 
-    // Max UV in medium font (positioned after current, in gray)
+    // Max UV in medium font (positioned after current)
     char uv_max_str[4];
     snprintf(uv_max_str, sizeof(uv_max_str), "%d", uv_high);
     int32_t uvmx = uvcx + 10, uvmy = cy;  // Position after current UV
-    write_mode((GFXfont *)&FiraSansMedium, uv_max_str, &uvmx, &uvmy, framebuffer, BLACK_ON_WHITE, &gray_props);
+    writeln((GFXfont *)&FiraSansMedium, uv_max_str, &uvmx, &uvmy, framebuffer);
 
     // --- Weather icon (top-right) ---
     draw_weather_icon(icon, 780, 122, 200, framebuffer);
 
-    // --- High / Low temps (medium font, below current temp, in gray) ---
+    // --- High / Low temps (medium font, below current temp) ---
     char hi_str[16], lo_str[16];
     snprintf(hi_str, sizeof(hi_str), "H: %d\xC2\xB0", high_temp);
     snprintf(lo_str, sizeof(lo_str), "L: %d\xC2\xB0", low_temp);
 
     int32_t hx = 50, hy = 215;
-    write_mode((GFXfont *)&FiraSansMedium, hi_str, &hx, &hy, framebuffer, BLACK_ON_WHITE, &gray_props);
+    writeln((GFXfont *)&FiraSansMedium, hi_str, &hx, &hy, framebuffer);
 
     int32_t lx = hx + 30, ly = 215;
-    write_mode((GFXfont *)&FiraSansMedium, lo_str, &lx, &ly, framebuffer, BLACK_ON_WHITE, &gray_props);
+    writeln((GFXfont *)&FiraSansMedium, lo_str, &lx, &ly, framebuffer);
 
     /* CARD-BASED LAYOUT - didn't work out
     // --- Temperature Card (left) ---
