@@ -164,6 +164,13 @@ static void render_display(int current_temp, int high_temp, int low_temp, Weathe
     // --- Weather icon (top-right) ---
     draw_weather_icon(icon, 780, 122, 200, framebuffer);
 
+    // --- Test moon icon (centered in whitespace between L temp and weather icon) ---
+    int32_t moon_test_cx = 550;
+    int32_t moon_test_cy = 130;
+    epd_draw_circle(moon_test_cx, moon_test_cy, 30, 0x00, framebuffer);  // Outer circle
+    epd_draw_circle(moon_test_cx, moon_test_cy, 29, 0x00, framebuffer);  // Thicker outline
+    epd_draw_circle(moon_test_cx, moon_test_cy, 28, 0x00, framebuffer);
+
     // --- High / Low temps (medium font, below current temp) ---
     char hi_str[16], lo_str[16];
     snprintf(hi_str, sizeof(hi_str), "H: %d\xC2\xB0", high_temp);

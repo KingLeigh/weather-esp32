@@ -76,7 +76,7 @@ export class WeatherAPIProvider extends WeatherProvider {
     const uvValues = hourly.map(h => h.uv);
     const uvHigh = Math.round(Math.max(...uvValues));
 
-    // Get moon data from astronomy
+    // Get moon data and sun times from astronomy
     const astro = today.astro;
 
     return {
@@ -91,6 +91,10 @@ export class WeatherAPIProvider extends WeatherProvider {
       uv: {
         current: Math.round(current.uv),
         high: uvHigh
+      },
+      sun: {
+        sunrise: astro.sunrise,  // e.g., "06:45 AM"
+        sunset: astro.sunset     // e.g., "05:30 PM"
       },
       moon: {
         illumination: parseInt(astro.moon_illumination),
