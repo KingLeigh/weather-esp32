@@ -134,10 +134,18 @@ static void draw_battery_icon(int32_t x, int32_t y, int percent, uint8_t *fb) {
 
 // Render all display elements to framebuffer
 static void render_display(int current_temp, int high_temp, int low_temp, WeatherIcon icon,
-                           int* precip_pct, int uv_current, int uv_high,
+                           int* precip_pct, const char* precip_type, int uv_current, int uv_high,
                            const char* age_str, int battery_percent) {
     // Clear framebuffer
     memset(framebuffer, 0xFF, EPD_WIDTH * EPD_HEIGHT / 2);
+
+    // Font properties for gray text (medium font elements)
+    FontProperties gray_props = {
+        .fg_color = 6,  // Gray (0x6 in 4-bit = medium gray)
+        .bg_color = 15, // White background
+        .fallback_glyph = 0,
+        .flags = 0
+    };
 
     // --- Current temperature (large font, top-left) ---
     char temp_str[8];
@@ -155,25 +163,25 @@ static void render_display(int current_temp, int high_temp, int low_temp, Weathe
     int32_t uvcx = cx + 105, uvcy = cy;
     writeln((GFXfont *)&FiraSansLarge, uv_current_str, &uvcx, &uvcy, framebuffer);
 
-    // Max UV in medium font (positioned after current)
+    // Max UV in medium font (positioned after current, in gray)
     char uv_max_str[4];
     snprintf(uv_max_str, sizeof(uv_max_str), "%d", uv_high);
     int32_t uvmx = uvcx + 10, uvmy = cy;  // Position after current UV
-    writeln((GFXfont *)&FiraSansMedium, uv_max_str, &uvmx, &uvmy, framebuffer);
+    write_mode((GFXfont *)&FiraSansMedium, uv_max_str, &uvmx, &uvmy, framebuffer, BLACK_ON_WHITE, &gray_props);
 
     // --- Weather icon (top-right) ---
     draw_weather_icon(icon, 780, 122, 200, framebuffer);
 
-    // --- High / Low temps (medium font, below current temp) ---
+    // --- High / Low temps (medium font, below current temp, in gray) ---
     char hi_str[16], lo_str[16];
     snprintf(hi_str, sizeof(hi_str), "H: %d\xC2\xB0", high_temp);
     snprintf(lo_str, sizeof(lo_str), "L: %d\xC2\xB0", low_temp);
 
     int32_t hx = 50, hy = 215;
-    writeln((GFXfont *)&FiraSansMedium, hi_str, &hx, &hy, framebuffer);
+    write_mode((GFXfont *)&FiraSansMedium, hi_str, &hx, &hy, framebuffer, BLACK_ON_WHITE, &gray_props);
 
     int32_t lx = hx + 30, ly = 215;
-    writeln((GFXfont *)&FiraSansMedium, lo_str, &lx, &ly, framebuffer);
+    write_mode((GFXfont *)&FiraSansMedium, lo_str, &lx, &ly, framebuffer, BLACK_ON_WHITE, &gray_props);
 
     /* CARD-BASED LAYOUT - didn't work out
     // --- Temperature Card (left) ---
@@ -234,10 +242,10 @@ static void render_display(int current_temp, int high_temp, int low_temp, Weathe
     END OLD UV INDEX */
 
     // --- Divider line ---
-    epd_draw_hline(40, 265, 880, 0x80, framebuffer);
+    // epd_draw_hline(40, 265, 880, 0x80, framebuffer);  // Temporarily disabled
 
     // --- Precipitation chart (4:3 aspect ratio, title below) ---
-    draw_precip_chart(40, 270, 280, 210, precip_pct, PRECIP_HOURS, framebuffer);
+    draw_precip_chart(40, 270, 280, 210, precip_pct, PRECIP_HOURS, precip_type, framebuffer);
 
     /* OLD UV INDEX POSITION (lower-right section) - kept for potential reversion
     // --- UV Index (right half of lower section) ---
@@ -398,6 +406,7 @@ void setup()
     WeatherIcon icon = weather.valid ? weather.weather : CLOUDY;  // Cloudy = error indicator
     int precip_zero[PRECIP_HOURS] = {0};
     int* precip_pct = weather.valid ? weather.precipitation : precip_zero;
+    const char* precip_type = weather.valid ? weather.precip_type : "rain";
     int uv_current = weather.valid ? weather.uv_current : 0;
     int uv_high = weather.valid ? weather.uv_high : 0;
 
@@ -408,7 +417,7 @@ void setup()
     char age_str[16];
     format_data_age(age_minutes, age_str, sizeof(age_str));
 
-    render_display(current_temp, high_temp, low_temp, icon, precip_pct,
+    render_display(current_temp, high_temp, low_temp, icon, precip_pct, precip_type,
                    uv_current, uv_high, age_str, battery_percent);
 
     Serial.println("Weather display updated");
@@ -448,6 +457,7 @@ void loop()
     int low_temp = weather.valid ? weather.temp_low : prev_weather.temp_low;
     WeatherIcon icon = weather.valid ? weather.weather : prev_weather.weather;
     int* precip_pct = weather.valid ? weather.precipitation : prev_weather.precipitation;
+    const char* precip_type = weather.valid ? weather.precip_type : prev_weather.precip_type;
     int uv_current = weather.valid ? weather.uv_current : prev_weather.uv_current;
     int uv_high = weather.valid ? weather.uv_high : prev_weather.uv_high;
 
@@ -478,7 +488,7 @@ void loop()
     Serial.println("Data changed - updating display");
 
     // Render display
-    render_display(current_temp, high_temp, low_temp, icon, precip_pct,
+    render_display(current_temp, high_temp, low_temp, icon, precip_pct, precip_type,
                    uv_current, uv_high, age_str, battery_percent);
 
     Serial.println("Weather display updated");

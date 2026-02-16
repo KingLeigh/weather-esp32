@@ -19,6 +19,7 @@ struct WeatherData {
     int temp_low;
     WeatherIcon weather;
     int precipitation[PRECIP_HOURS];
+    char precip_type[8];  // "rain", "snow", or "mixed"
     int uv_current;
     int uv_high;
     char updated[32];
@@ -173,6 +174,11 @@ bool fetchWeatherData(WeatherData* data) {
             for (int i = 0; i < PRECIP_HOURS; i++) {
                 data->precipitation[i] = (i < precip_array.size()) ? precip_array[i].as<int>() : 0;
             }
+
+            // Precipitation type
+            const char* precip_type_str = doc["precip_type"] | "rain";
+            strncpy(data->precip_type, precip_type_str, sizeof(data->precip_type) - 1);
+            data->precip_type[sizeof(data->precip_type) - 1] = '\0';
 
             data->uv_current = doc["uv"]["current"] | 0;
             data->uv_high = doc["uv"]["high"] | 0;

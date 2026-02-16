@@ -7,9 +7,10 @@
 // w, h: width and height of chart area
 // data: array of precipitation percentages (0-100)
 // count: number of data points
+// precip_type: "rain", "snow", or "mixed"
 // fb: framebuffer
 static void draw_precip_chart(int32_t x, int32_t y, int32_t w, int32_t h,
-                               const int *data, int count, uint8_t *fb) {
+                               const int *data, int count, const char *precip_type, uint8_t *fb) {
     // Use full height for chart since title is now below
     const int32_t chart_h = h;
     const int32_t chart_y = y;
@@ -63,9 +64,17 @@ static void draw_precip_chart(int32_t x, int32_t y, int32_t w, int32_t h,
             epd_draw_line(px[i], py[i] + 1, px[i + 1], py[i + 1] + 1, 0x00, fb);
         }
 
-        // Title (centered below chart)
+        // Title (centered below chart) - dynamic based on precipitation type
         // Note: writeln y-coordinate is the text BASELINE, text extends upward ~20px
-        const char *title = "Rain (12h)";
+        char title[16];
+        if (strcmp(precip_type, "snow") == 0) {
+            strcpy(title, "Snow (12h)");
+        } else if (strcmp(precip_type, "mixed") == 0) {
+            strcpy(title, "Mixed (12h)");
+        } else {
+            strcpy(title, "Rain (12h)");
+        }
+
         // Center the text horizontally (with slight left adjustment)
         // FiraSans ~12px per character for more accurate centering
         int32_t text_width = strlen(title) * 12;

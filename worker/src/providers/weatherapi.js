@@ -34,11 +34,34 @@ export class WeatherAPIProvider extends WeatherProvider {
     // Extract 12 hours of precipitation data starting from current hour
     // Use max of rain or snow chance to capture all precipitation types
     const precipitation = [];
+    let totalRain = 0;
+    let totalSnow = 0;
+
     for (let i = 0; i < 12; i++) {
       const hourIndex = (currentHour + i) % 24;
       const hourData = hourly[hourIndex];
-      const precipChance = Math.max(hourData.chance_of_rain || 0, hourData.chance_of_snow || 0);
+      const rainChance = hourData.chance_of_rain || 0;
+      const snowChance = hourData.chance_of_snow || 0;
+      const precipChance = Math.max(rainChance, snowChance);
       precipitation.push(precipChance);
+
+      // Track which type is more prevalent
+      totalRain += rainChance;
+      totalSnow += snowChance;
+    }
+
+    // Determine precipitation type for labeling
+    let precipType = 'rain';  // default
+    if (totalSnow > 0 && totalRain > 0) {
+      // Both present - check if mixed (>20% of each type)
+      const rainRatio = totalRain / (totalRain + totalSnow);
+      if (rainRatio > 0.2 && rainRatio < 0.8) {
+        precipType = 'mixed';
+      } else if (totalSnow > totalRain) {
+        precipType = 'snow';
+      }
+    } else if (totalSnow > totalRain) {
+      precipType = 'snow';
     }
 
     // Map weather condition to our icon types
@@ -64,6 +87,7 @@ export class WeatherAPIProvider extends WeatherProvider {
       },
       weather: weatherIcon,
       precipitation: precipitation,
+      precip_type: precipType,  // "rain", "snow", or "mixed"
       uv: {
         current: Math.round(current.uv),
         high: uvHigh
