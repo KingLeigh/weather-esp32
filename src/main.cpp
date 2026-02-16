@@ -156,11 +156,18 @@ static void draw_battery_icon(int32_t x, int32_t y, int percent, uint8_t *fb) {
     }
 }
 
+// Populate default weather data for when fetch fails
+static void init_default_weather(WeatherData* data) {
+    memset(data, 0, sizeof(WeatherData));
+    data->weather = CLOUDY;
+    strcpy(data->precip_type, "rain");
+    strcpy(data->moon_phase, "Full Moon");
+    strcpy(data->sunrise, "6:00 AM");
+    strcpy(data->sunset, "6:00 PM");
+}
+
 // Render all display elements to framebuffer
-static void render_display(int current_temp, int high_temp, int low_temp, WeatherIcon icon,
-                           int* precip_pct, const char* precip_type, int uv_current, int uv_high,
-                           const char* moon_phase, const char* sunrise, const char* sunset,
-                           const char* age_str, int battery_percent) {
+static void render_display(const WeatherData* weather, const char* age_str, int battery_percent) {
     // Clear framebuffer
     memset(framebuffer, 0xFF, EPD_WIDTH * EPD_HEIGHT / 2);
 
@@ -170,42 +177,39 @@ static void render_display(int current_temp, int high_temp, int low_temp, Weathe
 
     // --- Current temperature (large font) ---
     char temp_str[8];
-    snprintf(temp_str, sizeof(temp_str), "%d\xC2\xB0", current_temp);
+    snprintf(temp_str, sizeof(temp_str), "%d\xC2\xB0", weather->temp_current);
     int32_t cx = base_x, cy = base_y;
     writeln((GFXfont *)&FiraSansLarge, temp_str, &cx, &cy, framebuffer);
 
     // --- UV Index (on same line as temperature) ---
-    // Sun icon + current (large) + max (medium): ☀2 3
-    draw_sun_small(cx + 70, cy - 30, framebuffer);  // Sun icon (centered with large text)
+    draw_sun_small(cx + 70, cy - 30, framebuffer);
 
-    // Current UV in large font
     char uv_current_str[4];
-    snprintf(uv_current_str, sizeof(uv_current_str), "%d", uv_current);
+    snprintf(uv_current_str, sizeof(uv_current_str), "%d", weather->uv_current);
     int32_t uvcx = cx + 105, uvcy = cy;
     writeln((GFXfont *)&FiraSansLarge, uv_current_str, &uvcx, &uvcy, framebuffer);
 
-    // Max UV in medium font (positioned after current)
     char uv_max_str[4];
-    snprintf(uv_max_str, sizeof(uv_max_str), "%d", uv_high);
-    int32_t uvmx = uvcx + 10, uvmy = cy;  // Position after current UV
+    snprintf(uv_max_str, sizeof(uv_max_str), "%d", weather->uv_high);
+    int32_t uvmx = uvcx + 10, uvmy = cy;
     writeln((GFXfont *)&FiraSansMedium, uv_max_str, &uvmx, &uvmy, framebuffer);
 
     // --- High / Low temps (medium font, below current temp) ---
     char hi_str[16], lo_str[16];
-    snprintf(hi_str, sizeof(hi_str), "H: %d\xC2\xB0", high_temp);
-    snprintf(lo_str, sizeof(lo_str), "L: %d\xC2\xB0", low_temp);
+    snprintf(hi_str, sizeof(hi_str), "H: %d\xC2\xB0", weather->temp_high);
+    snprintf(lo_str, sizeof(lo_str), "L: %d\xC2\xB0", weather->temp_low);
 
-    int32_t hx = base_x, hy = base_y + 85;  // 85 pixels below current temp baseline
+    int32_t hx = base_x, hy = base_y + 85;
     writeln((GFXfont *)&FiraSansMedium, hi_str, &hx, &hy, framebuffer);
 
     int32_t lx = hx + 30, ly = base_y + 85;
     writeln((GFXfont *)&FiraSansMedium, lo_str, &lx, &ly, framebuffer);
 
     // --- Weather icon (top-left) ---
-    draw_weather_icon(icon, 150, 130, framebuffer);
+    draw_weather_icon(weather->weather, 150, 130, framebuffer);
 
     // --- Moon phase icon (top-right) ---
-    const uint8_t* moon_bitmap = get_moon_phase_bitmap(moon_phase);
+    const uint8_t* moon_bitmap = get_moon_phase_bitmap(weather->moon_phase);
     draw_bitmap(moon_bitmap, 820, 130, MOON_ICON_SIZE, framebuffer);
 
     // --- Sunrise/Sunset times (lower right) ---
@@ -213,28 +217,25 @@ static void render_display(int current_temp, int high_temp, int low_temp, Weathe
     int32_t sunrise_y = 380;
     int32_t sunset_y = 428;
 
-    // Sunrise icon (sun on horizon) - centered above text
     draw_sunrise_icon(sun_x + 85, sunrise_y - 48, framebuffer);
 
     int32_t srx = sun_x, sry = sunrise_y;
-    writeln((GFXfont *)&FiraSans, sunrise, &srx, &sry, framebuffer);
+    writeln((GFXfont *)&FiraSans, weather->sunrise, &srx, &sry, framebuffer);
 
     int32_t ssx = sun_x, ssy = sunset_y;
-    writeln((GFXfont *)&FiraSans, sunset, &ssx, &ssy, framebuffer);
+    writeln((GFXfont *)&FiraSans, weather->sunset, &ssx, &ssy, framebuffer);
 
     // --- Precipitation chart (24 hours) ---
-    draw_precip_chart(40, 270, 560, 210, precip_pct, PRECIP_HOURS, precip_type, framebuffer);
+    draw_precip_chart(40, 270, 560, 210, weather->precipitation, PRECIP_HOURS, weather->precip_type, framebuffer);
 
     // --- Battery icon and data age (lower-right corner) ---
     int32_t battery_x = EPD_WIDTH - 55;
     int32_t battery_y = EPD_HEIGHT - 35;
 
-    // Show battery icon
     draw_battery_icon(battery_x, battery_y, battery_percent, framebuffer);
 
-    // Age to the left of battery (only if data is stale > 30 minutes)
     if (strlen(age_str) > 0) {
-        int32_t age_x = battery_x - 80;  // Position age to the left of battery
+        int32_t age_x = battery_x - 80;
         int32_t age_y = EPD_HEIGHT - 15;
         writeln((GFXfont *)&FiraSans, age_str, &age_x, &age_y, framebuffer);
     }
@@ -314,9 +315,7 @@ void setup()
     epd_init();
 
     // --- Connect to WiFi and fetch weather data ---
-    WeatherData weather;
-    weather.valid = false;
-
+    WeatherData weather = {};
     if (connectWiFi()) {
         if (fetchWeatherData(&weather)) {
             Serial.println("Weather data fetched successfully!");
@@ -328,29 +327,18 @@ void setup()
         Serial.println("WiFi connection failed");
     }
 
-    // Use fetched data, or show zeros if fetch failed (clear error indication)
-    int current_temp = weather.valid ? weather.temp_current : 0;
-    int high_temp = weather.valid ? weather.temp_high : 0;
-    int low_temp = weather.valid ? weather.temp_low : 0;
-    WeatherIcon icon = weather.valid ? weather.weather : CLOUDY;  // Cloudy = error indicator
-    int precip_zero[PRECIP_HOURS] = {0};
-    int* precip_pct = weather.valid ? weather.precipitation : precip_zero;
-    const char* precip_type = weather.valid ? weather.precip_type : "rain";
-    int uv_current = weather.valid ? weather.uv_current : 0;
-    int uv_high = weather.valid ? weather.uv_high : 0;
-    const char* moon_phase = weather.valid ? weather.moon_phase : "Full Moon";
-    const char* sunrise = weather.valid ? weather.sunrise : "6:00 AM";
-    const char* sunset = weather.valid ? weather.sunset : "6:00 PM";
+    // Use defaults if fetch failed
+    if (!weather.valid) {
+        init_default_weather(&weather);
+    }
 
     // Read battery and calculate data age
     int battery_percent = read_battery_percent();
-    const char* timestamp = weather.valid ? weather.updated : prev_weather.updated;
-    int age_minutes = get_data_age_minutes(timestamp);
+    int age_minutes = get_data_age_minutes(weather.updated);
     char age_str[16];
     format_data_age(age_minutes, age_str, sizeof(age_str));
 
-    render_display(current_temp, high_temp, low_temp, icon, precip_pct, precip_type,
-                   uv_current, uv_high, moon_phase, sunrise, sunset, age_str, battery_percent);
+    render_display(&weather, age_str, battery_percent);
 
     Serial.println("Weather display updated");
     Serial.printf("Next update in %d seconds...\n\n", UPDATE_INTERVAL_SECONDS);
@@ -369,9 +357,7 @@ void loop()
     Serial.println("\n=== Starting new weather update ===");
 
     // Fetch fresh weather data
-    WeatherData weather;
-    weather.valid = false;
-
+    WeatherData weather = {};
     if (connectWiFi()) {
         if (fetchWeatherData(&weather)) {
             Serial.println("Weather data fetched successfully!");
@@ -383,37 +369,23 @@ void loop()
         Serial.println("WiFi connection failed");
     }
 
-    // Use fetched data if valid, otherwise keep showing previous data
-    int current_temp = weather.valid ? weather.temp_current : prev_weather.temp_current;
-    int high_temp = weather.valid ? weather.temp_high : prev_weather.temp_high;
-    int low_temp = weather.valid ? weather.temp_low : prev_weather.temp_low;
-    WeatherIcon icon = weather.valid ? weather.weather : prev_weather.weather;
-    int* precip_pct = weather.valid ? weather.precipitation : prev_weather.precipitation;
-    const char* precip_type = weather.valid ? weather.precip_type : prev_weather.precip_type;
-    int uv_current = weather.valid ? weather.uv_current : prev_weather.uv_current;
-    int uv_high = weather.valid ? weather.uv_high : prev_weather.uv_high;
-    const char* moon_phase = weather.valid ? weather.moon_phase : prev_weather.moon_phase;
-    const char* sunrise = weather.valid ? weather.sunrise : prev_weather.sunrise;
-    const char* sunset = weather.valid ? weather.sunset : prev_weather.sunset;
+    // Use previous data if fetch failed
+    const WeatherData* display_weather = weather.valid ? &weather : &prev_weather;
 
     // Read battery and calculate data age
-    const char* timestamp = weather.valid ? weather.updated : prev_weather.updated;
     int battery_percent = read_battery_percent();
-    int age_minutes = get_data_age_minutes(timestamp);
+    int age_minutes = get_data_age_minutes(display_weather->updated);
     char age_str[16];
     format_data_age(age_minutes, age_str, sizeof(age_str));
 
     // Check if we should update the display
     bool data_changed = weather_data_changed(&prev_weather, &weather, prev_battery_percent, battery_percent);
-    bool prev_showing_age = (prev_age_minutes > 30);
-    bool now_showing_age = (age_minutes > 30);
-    bool age_display_changed = (prev_showing_age != now_showing_age);
+    bool age_display_changed = (prev_age_minutes > 30) != (age_minutes > 30);
     bool should_update = data_changed || age_display_changed;
 
     if (!should_update) {
         Serial.println("No changes detected - skipping display update");
         Serial.printf("Next update in %d seconds...\n\n", UPDATE_INTERVAL_SECONDS);
-        // Still save state even if not updating display
         prev_weather = weather;
         prev_battery_percent = battery_percent;
         prev_age_minutes = age_minutes;
@@ -421,10 +393,7 @@ void loop()
     }
 
     Serial.println("Data changed - updating display");
-
-    // Render display
-    render_display(current_temp, high_temp, low_temp, icon, precip_pct, precip_type,
-                   uv_current, uv_high, moon_phase, sunrise, sunset, age_str, battery_percent);
+    render_display(display_weather, age_str, battery_percent);
 
     Serial.println("Weather display updated");
     Serial.printf("Next update in %d seconds...\n\n", UPDATE_INTERVAL_SECONDS);
