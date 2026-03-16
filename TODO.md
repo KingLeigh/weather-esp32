@@ -1,11 +1,5 @@
 # Weather Display - TODO List
 
-## Icon Improvements
-- [ ] **Night mode icons** - Add moon and moon+cloud icons for nighttime weather
-  - Need new icon designs for nighttime conditions
-  - Update API to detect day/night and return appropriate icons
-  - Add MOON and MOON_CLOUDY to WeatherIcon enum
-
 ## Display Modes
 - [ ] **Full night mode** - Black pixels with white text for nighttime display
   - Invert all colors during night hours
@@ -24,14 +18,6 @@
 - [ ] **Clock display** - Show current time on the display
   - NTP infrastructure is already in place
   - Add a visible clock element to the layout
-
-## Visual Updates
-- [ ] **UV Index icon update** - Replace small primitive sun with better design
-  - Currently uses simple circle with rays
-  - Could use a bitmap icon to match new weather icons
-
-- [ ] **Layout tweaks** - General positioning/spacing improvements
-  - TBD: Specific adjustments needed after testing other features
 
 ---
 

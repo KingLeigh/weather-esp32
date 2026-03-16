@@ -1,89 +1,76 @@
-# Development Tools
+# Development Tools (`tools/`)
 
-## Icon Converter (`convert_icons.py`)
+Python scripts for converting PNG icon assets into C header files, plus an ESP32 test program for previewing icons on the physical display.
 
-Converts PNG weather icons to EPD47 4-bit grayscale bitmap format for embedded display.
+## How It Works
 
-### Requirements:
+The e-paper display uses 4-bit grayscale bitmaps (16 shades, 2 pixels per byte). Icons are designed as standard PNG files, then converted into C `const uint8_t[]` arrays that get compiled directly into the firmware. This avoids runtime image decoding on the ESP32.
 
+The conversion pipeline:
+1. Design icons as PNG files (any size, with transparency)
+2. Run a converter script to resize, grayscale-convert, and pack into nibble-packed byte arrays
+3. Output is a `.h` file included by the firmware at compile time
+
+## Files
+
+### `convert_icons.py`
+
+Converts weather icon PNGs (200x200) into `src/weather_icon_bitmaps.h`.
+
+**Key function:**
+
+- `png_to_epd47_bitmap(png_path, output_size)` -- Loads a PNG, resizes to `output_size` x `output_size` with Lanczos resampling, converts to grayscale (compositing RGBA over white), quantizes to 4-bit (0-15), packs pairs of pixels into bytes (high nibble first), and returns a C array definition string.
+- `main()` -- Iterates over a hardcoded list of 9 icon filenames (sun, moon, partly, partly-night, cloud, rainy, snowflake, lighting, fog), converts each, and writes the combined output to `src/weather_icon_bitmaps.h`.
+
+**Input:** PNG files from `~/Desktop/weather_icons/`
+**Output:** `src/weather_icon_bitmaps.h` (~1.1MB, 9 icons at 20,000 bytes each)
+
+**Requirements:** `pip3 install Pillow`
+
+**Usage:**
 ```bash
-pip3 install Pillow
+python3 tools/convert_icons.py
 ```
 
-### Usage:
+### `convert_moon_icons.py`
 
-1. Place your icon PNG files in `/Users/leighherbert/Desktop/weather_icons/`
-   - Icons should be square (any size, will be resized to 200x200)
-   - Supported formats: PNG with transparency preferred
-   - Expected filenames:
-     - `sun.png` → SUNNY
-     - `partly.png` → PARTLY_CLOUDY
-     - `cloud.png` → CLOUDY
-     - `rainy.png` → RAINY
-     - `snowflake.png` → SNOWY
-     - `lighting.png` → THUNDERSTORM
-     - `fog.png` → FOG
+Converts moon phase PNGs (100x100) into `src/moon_phase_bitmaps.h`.
 
-2. Run the converter:
-   ```bash
-   python3 tools/convert_icons.py
-   ```
+**Key function:**
 
-3. This generates `src/weather_icon_bitmaps.h` with bitmap arrays
+- `png_to_epd47_bitmap(png_path, output_size)` -- Same conversion logic as `convert_icons.py` but defaults to 100x100 output size. Array names are prefixed with `moon_` instead of `icon_`.
+- `main()` -- Converts 8 moon phase icons (1-new, 2-crescent, 3-quarter, 4-gibbous, 5-full, 6-gibbous, 7-quarter, 8-crescent) and writes to `src/moon_phase_bitmaps.h`.
 
-4. Rebuild and upload:
-   ```bash
-   export PATH="$HOME/Library/Python/3.9/bin:$PATH"
-   pio run -t upload --upload-port /dev/cu.usbmodem1101
-   ```
+**Input:** PNG files from `~/Desktop/weather_icons/moon/`
+**Output:** `src/moon_phase_bitmaps.h` (~248KB, 8 icons at 5,000 bytes each)
 
-### Adding new icons:
+**Requirements:** `pip3 install Pillow`
 
-1. Add the PNG file to the icon directory
-2. Edit `tools/convert_icons.py` and add the filename to the `icons` list
-3. Edit `src/weather_icons.h` and add the new enum value + case statement
-4. Run the converter and rebuild
+**Usage:**
+```bash
+python3 tools/convert_moon_icons.py
+```
 
-### Technical details:
+### `icon_viewer.cpp`
 
-- Output format: 4-bit grayscale (0x00=black, 0xFF=white)
-- Packing: 2 pixels per byte (nibble-packed)
-- Size: 200x200 pixels = 20,000 bytes per icon
-- Transparent areas are rendered as white background
+An ESP32 test program that displays all weather icons on the e-paper in a grid layout for visual review. Not part of the normal build -- must be temporarily swapped in as `src/main.cpp`.
 
----
-
-## Icon Viewer (`icon_viewer.cpp`)
-
-A test program that displays all weather icons on the e-paper display for visual review.
-
-### Usage:
-
-1. Temporarily swap the main program:
-   ```bash
-   mv src/main.cpp src/main.cpp.bak
-   cp tools/icon_viewer.cpp src/main.cpp
-   ```
-
-2. Build and upload:
-   ```bash
-   export PATH="$HOME/Library/Python/3.9/bin:$PATH"
-   pio run -t upload --upload-port /dev/cu.usbmodem1101
-   ```
-
-3. Take a photo of the display showing all icons
-
-4. Restore the main program:
-   ```bash
-   mv src/main.cpp.bak src/main.cpp
-   pio run -t upload --upload-port /dev/cu.usbmodem1101
-   ```
-
-### What it displays:
-
-Shows all 7 weather icons in a grid layout:
+**What it displays:**
 - Row 1: SUNNY, PARTLY_CLOUDY, CLOUDY
 - Row 2: RAINY, SNOWY, THUNDERSTORM
 - Row 3: FOG (centered)
 
-Each icon is labeled with its name.
+Each icon is drawn at 180x180 pixels with a text label below.
+
+**Usage:**
+```bash
+mv src/main.cpp src/main.cpp.bak
+cp tools/icon_viewer.cpp src/main.cpp
+pio run -t upload --upload-port /dev/cu.usbmodem2101
+# Review the display, then restore:
+mv src/main.cpp.bak src/main.cpp
+```
+
+## Classes
+
+This directory contains no classes. All scripts are procedural Python with standalone functions, and the icon viewer is a single-file Arduino sketch using `setup()` / `loop()`.
