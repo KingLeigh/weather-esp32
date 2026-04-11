@@ -30,7 +30,6 @@ weather-claude/
 ├── worker/          Cloudflare Worker backend
 ├── tools/           Icon conversion and testing utilities
 ├── platformio.ini   PlatformIO build configuration
-├── preview.py       Python script to preview the display layout as PNG
 └── TODO.md          Project roadmap
 ```
 
@@ -49,10 +48,6 @@ Python scripts for converting PNG icon assets into C header files containing 4-b
 ### `platformio.ini`
 
 PlatformIO build configuration. Targets the `esp32-s3-devkitc-1` board with the espressif32 platform and Arduino framework. Configures PSRAM, USB CDC, and pulls in the LilyGo-EPD47 and ArduinoJson libraries.
-
-### `preview.py`
-
-A Python (Pillow) script that renders a simulated version of the display layout as a PNG image. Useful for iterating on layout without flashing the board. Run with `python3 preview.py` (normal layout) or `python3 preview.py icons` (icon gallery).
 
 ## Getting Started
 
