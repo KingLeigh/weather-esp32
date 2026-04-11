@@ -88,6 +88,8 @@ export class WeatherAPIProvider extends WeatherProvider {
       weather: weatherIcon,
       precipitation: precipitation,
       precip_type: precipType,  // "rain", "snow", or "mixed"
+      rain_mm: Math.round((today.day.totalprecip_mm || 0) * 10) / 10,
+      snow_mm: Math.round((today.day.totalsnow_cm || 0) * 10) / 10,  // WeatherAPI reports snow in cm
       uv: {
         current: Math.round(current.uv),
         high: uvHigh

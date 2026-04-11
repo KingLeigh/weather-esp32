@@ -1,4 +1,5 @@
 import { WeatherAPIProvider } from './weatherapi.js';
+import { OpenWeatherMapProvider } from './openweathermap.js';
 
 /**
  * Weather provider factory
@@ -6,9 +7,7 @@ import { WeatherAPIProvider } from './weatherapi.js';
  */
 const PROVIDERS = {
   'weatherapi': WeatherAPIProvider,
-  // Add more providers here in the future:
-  // 'openweathermap': OpenWeatherMapProvider,
-  // 'weathergov': WeatherGovProvider,
+  'openweathermap': OpenWeatherMapProvider,
 };
 
 /**

@@ -10,7 +10,7 @@ id = "bd1e4ef949604fcc8a02eb116c755dbc"
 # Environment variables
 # WEATHER_API_KEY is set via `wrangler secret put` (not in this file for security)
 [vars]
-WEATHER_PROVIDER = "weatherapi"
+WEATHER_PROVIDER = "openweathermap"
 WEATHER_LOCATION = "40.739214,-73.987265"
 
 # Scheduled cron trigger - runs every 15 minutes
