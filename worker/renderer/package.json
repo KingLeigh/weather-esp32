@@ -1,0 +1,23 @@
+{
+  "name": "weather-renderer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Server-side renderer for the weather e-paper display. Step 1: local preview only.",
+  "type": "module",
+  "scripts": {
+    "postinstall": "node scripts/fetch-fonts.js",
+    "setup": "node scripts/fetch-fonts.js",
+    "preview": "tsx src/preview.js",
+    "preview:icons": "tsx src/preview-icons.jsx",
+    "preview:weather-icons": "tsx src/preview-weather-icons.jsx"
+  },
+  "dependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "react": "^18.3.1",
+    "satori": "^0.12.1"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "weathericons": "^2.1.0"
+  }
+}
