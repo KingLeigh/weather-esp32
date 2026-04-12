@@ -116,7 +116,7 @@ export class OpenWeatherMapProvider extends WeatherProvider {
       is_day: isDay,
       updated: (() => {
         const formatter = new Intl.DateTimeFormat('en-US', {
-          timeZone: this.timezone,
+          timeZone: data.timezone,
           year: 'numeric',
           month: '2-digit',
           day: '2-digit',

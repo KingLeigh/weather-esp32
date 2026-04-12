@@ -29,7 +29,6 @@ id = "bd1e4ef949604fcc8a02eb116c755dbc"
 [vars]
 WEATHER_PROVIDER = "openweathermap"
 WEATHER_LOCATION = "40.739214,-73.987265"
-TIMEZONE = "America/New_York"
 
 # Scheduled cron trigger - runs every 3 minutes
 [triggers]

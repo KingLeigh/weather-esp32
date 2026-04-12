@@ -3,13 +3,12 @@
  * All weather API providers must implement this interface
  */
 export class WeatherProvider {
-  constructor(apiKey, location, timezone) {
+  constructor(apiKey, location) {
     if (this.constructor === WeatherProvider) {
       throw new Error("WeatherProvider is abstract and cannot be instantiated directly");
     }
     this.apiKey = apiKey;
     this.location = location;
-    this.timezone = timezone || 'America/New_York';
   }
 
   /**
