@@ -24,11 +24,17 @@ export class WeatherProvider {
    * @param {Object} rawData - Raw API response
    * @returns {Object} Transformed weather data in standard format:
    * {
-   *   temperature: { current: number, high: number, low: number },
-   *   weather: string (sunny|cloudy|partly_cloudy|rainy|snowy),
-   *   precipitation: number[] (12 hourly values, 0-100),
-   *   uv: { current: number, high: number },
-   *   updated: string (ISO 8601 timestamp)
+   *   temperature: { current, high, low },
+   *   weather: 'sunny'|'cloudy'|'partly_cloudy'|'rainy'|'snowy'|'thunderstorm'|'fog',
+   *   rain_chance: number[24] (0-100 per hour),
+   *   snow_chance: number[24] (0-100 per hour),
+   *   hourly_temp: number[24] (°F per hour),
+   *   rain_mm: number, snow_mm: number,
+   *   uv: { current, high },
+   *   sun: { sunrise, sunset },
+   *   moon: { illumination, phase },
+   *   is_day: boolean,
+   *   updated: string (ISO 8601, local time)
    * }
    */
   transform(rawData) {

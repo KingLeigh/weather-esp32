@@ -2,42 +2,26 @@ import { createProvider } from './providers/index.js';
 import { renderWeatherPng } from './render.jsx';
 
 /**
- * Cloudflare Worker for weather data
+ * Cloudflare Worker — weather display renderer
  *
- * Handles:
- * 1. HTTP GET /weather.json - Serve cached weather JSON to ESP32
- * 2. HTTP GET /weather.png  - Serve rendered weather PNG for e-paper display
- * 3. Scheduled cron - Fetch fresh data + render PNG every 15 minutes
+ * Fetches weather data from the configured provider, renders a 960x540
+ * grayscale PNG via satori + resvg-wasm, caches it in KV, and serves it
+ * to the ESP32 e-paper display.
+ *
+ * Endpoints:
+ *   GET /weather.png  — cached rendered PNG with X-Updated header
+ *   GET /             — info page
+ *
+ * Cron (every 3 minutes):
+ *   Fetches weather, re-renders PNG only when data has changed.
  */
 
 export default {
-  /**
-   * HTTP request handler
-   */
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
-    // Handle /weather.json endpoint
-    if (url.pathname === '/weather.json') {
-      const cachedData = await env.WEATHER_KV.get('current', 'json');
-
-      if (!cachedData) {
-        try {
-          const weatherData = await fetchWeatherData(env);
-          await storeWeatherData(env, weatherData);
-          return jsonResponse(weatherData);
-        } catch (error) {
-          return jsonResponse({ error: 'Failed to fetch weather data' }, 500);
-        }
-      }
-
-      return jsonResponse(cachedData);
-    }
-
-    // Handle /weather.png endpoint — rendered e-paper image
     if (url.pathname === '/weather.png') {
       try {
-        // Try cached PNG first.
         const [cachedPng, cachedUpdated] = await Promise.all([
           env.WEATHER_KV.get('render_png', 'arrayBuffer'),
           env.WEATHER_KV.get('render_updated', 'text'),
@@ -47,10 +31,8 @@ export default {
           return pngResponse(cachedPng, cachedUpdated || '');
         }
 
-        // Cache miss — fetch weather, render, cache, and serve.
+        // Cache miss — fetch, render, cache, and serve.
         const weatherData = await fetchWeatherData(env);
-        await storeWeatherData(env, weatherData);
-
         const png = await renderWeatherPng(weatherData);
         await storeRenderedPng(env, png, weatherData.updated);
 
@@ -60,16 +42,14 @@ export default {
       }
     }
 
-    // Root info page
     if (url.pathname === '/') {
       return new Response(`
-        <h1>Weather API for ESP32</h1>
+        <h1>Weather Display API</h1>
         <p>Endpoints:</p>
         <ul>
-          <li><a href="/weather.json">/weather.json</a> - Current weather data</li>
           <li><a href="/weather.png">/weather.png</a> - Rendered e-paper PNG (960x540 grayscale)</li>
         </ul>
-        <p>Provider: ${env.WEATHER_PROVIDER || 'weatherapi'}</p>
+        <p>Provider: ${env.WEATHER_PROVIDER || 'openweathermap'}</p>
         <p>Location: ${env.WEATHER_LOCATION || 'Manhattan'}</p>
       `, {
         headers: { 'Content-Type': 'text/html' }
@@ -82,28 +62,23 @@ export default {
   /**
    * Scheduled handler (cron trigger, every 3 minutes)
    *
-   * Fetches weather data on every cycle so the `updated` timestamp stays
-   * fresh (the device uses it for staleness detection). But the expensive
-   * satori+resvg render is skipped if the weather data hasn't actually
-   * changed since the last render — a simple JSON hash comparison.
+   * Fetches weather data on every cycle to keep the `updated` timestamp
+   * fresh. The expensive satori+resvg render is skipped if the weather
+   * data hasn't changed since the last render.
    */
   async scheduled(event, env, ctx) {
     try {
       console.log('Scheduled weather fetch triggered');
       const weatherData = await fetchWeatherData(env);
 
-      // Always store the JSON (refreshes `updated` timestamp + KV TTL).
-      await storeWeatherData(env, weatherData);
-
-      // Hash the weather-relevant fields (everything except `updated`,
-      // which changes every cycle). Skip the render if unchanged.
+      // Hash the weather-relevant fields (excluding `updated`, which
+      // changes every cycle). Skip the render if unchanged.
       const dataForHash = { ...weatherData, updated: undefined };
       const newHash = simpleHash(JSON.stringify(dataForHash));
       const prevHash = await env.WEATHER_KV.get('render_hash', 'text');
 
       if (prevHash === newHash) {
-        // Data unchanged — refresh the PNG's timestamp + TTL without
-        // re-rendering. The device sees a fresh `X-Updated` header.
+        // Data unchanged — just refresh the timestamp + TTL.
         console.log('Weather unchanged — refreshing timestamp only');
         await env.WEATHER_KV.put('render_updated', weatherData.updated, {
           expirationTtl: KV_TTL,
@@ -140,13 +115,6 @@ function simpleHash(str) {
 
 const KV_TTL = 3600; // 1 hour
 
-/** Store weather JSON in KV. */
-async function storeWeatherData(env, weatherData) {
-  await env.WEATHER_KV.put('current', JSON.stringify(weatherData), {
-    expirationTtl: KV_TTL,
-  });
-}
-
 /** Store the rendered PNG and its timestamp in KV. */
 async function storeRenderedPng(env, pngBytes, updated) {
   await Promise.all([
@@ -158,7 +126,7 @@ async function storeRenderedPng(env, pngBytes, updated) {
 // ─── weather data ────────────────────────────────────────────────────────────
 
 async function fetchWeatherData(env) {
-  const providerName = env.WEATHER_PROVIDER || 'weatherapi';
+  const providerName = env.WEATHER_PROVIDER || 'openweathermap';
   const apiKey = env.WEATHER_API_KEY;
   const location = env.WEATHER_LOCATION || 'Manhattan';
 
@@ -171,17 +139,6 @@ async function fetchWeatherData(env) {
 }
 
 // ─── response helpers ────────────────────────────────────────────────────────
-
-function jsonResponse(data, status = 200) {
-  return new Response(JSON.stringify(data, null, 2), {
-    status,
-    headers: {
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
-      'Cache-Control': 'public, max-age=300',
-    },
-  });
-}
 
 function pngResponse(pngBytes, updated) {
   return new Response(pngBytes, {

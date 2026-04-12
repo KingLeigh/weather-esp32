@@ -7,8 +7,7 @@ An always-on weather display built on the LilyGo T5 4.7" S3 E-Paper board (ESP32
 ```
   OpenWeatherMap API
         ↓
-  Cloudflare Worker (every 15 min)
-    ├─ /weather.json  (raw JSON, for legacy firmware)
+  Cloudflare Worker (every 3 min)
     └─ /weather.png   (960x540 grayscale PNG, server-rendered)
         ↓
   ESP32 (every 5 min wake)
@@ -26,8 +25,8 @@ All weather UI rendering happens on the server (JSX layout → satori → resvg 
 - Current temperature (large) with high/low
 - Weather condition icon (Erik Flowers Weather Icons font)
 - UV index with custom sun icon (current + daily high)
-- 24-hour precipitation probability chart with real time axis labels
-- Sunrise and sunset times
+- 24-hour chart: temperature time series (dry) or precipitation bars (rain/snow)
+- Right-aligned summary: "No umbrella needed!" or "Rain at 4pm · 0.8" total"
 - Battery level indicator (device-side overlay)
 - Data staleness warning when data is older than 30 minutes (device-side overlay)
 
@@ -35,31 +34,24 @@ All weather UI rendering happens on the server (JSX layout → satori → resvg 
 
 ```
 weather-claude/
-├── firmware-png/        ESP32 firmware: fetch PNG → decode → display (active)
-├── src/                 ESP32 firmware: fetch JSON → render on-device (legacy)
+├── firmware-png/        ESP32 firmware: fetch PNG → decode → display
 ├── firmware-png-test/   Disposable: embedded PNG decode smoke test
-├── worker/
-│   ├── src/             Cloudflare Worker API (routing, caching, providers)
-│   └── renderer/        Shared layout + local preview tooling
-├── tools/               Icon conversion utilities
-└── platformio.ini       PlatformIO config for legacy firmware
+└── worker/
+    ├── src/             Cloudflare Worker (routing, caching, providers, renderer)
+    └── renderer/        Shared layout + local preview tooling
 ```
 
-### `firmware-png/` — Active Firmware
+### `firmware-png/` — ESP32 Firmware
 
-The production firmware. Fetches `/weather.png` from the Worker, decodes with PNGdec, draws battery + staleness overlay, pushes to e-paper, deep sleeps for 5 minutes. Uses PNG hash in RTC memory for change detection.
+The production firmware. Fetches `/weather.png` from the Worker, decodes with PNGdec, draws battery + staleness overlay, pushes to e-paper, deep sleeps. Uses PNG hash in RTC memory for change detection.
 
-### `src/` — Legacy Firmware
-
-The original "smart" firmware that fetches `/weather.json` and renders the entire UI on-device. Kept for reference; may be retired once the PNG pipeline is fully proven.
-
-### `worker/` — Cloudflare Worker Backend
+### `worker/` — Cloudflare Worker
 
 Server-side weather API + PNG rendering pipeline. See [`worker/README.md`](worker/README.md) for full documentation including setup-from-scratch instructions.
 
 ### `firmware-png-test/` — Smoke Test (Disposable)
 
-Minimal firmware that decodes an embedded PNG (no WiFi). Used to verify PNGdec + e-paper pipeline before building the network side. Can be deleted once no longer needed.
+Minimal firmware that decodes an embedded PNG (no WiFi). Used to verify PNGdec + e-paper pipeline. Can be deleted once no longer needed.
 
 ## Getting Started
 
@@ -104,6 +96,7 @@ npm run deploy
 ```bash
 cd worker/renderer
 npm run preview          # renders preview.svg + preview.png from sample data
+npm run preview:all      # side-by-side: dry, rain, rain+snow variants
 ```
 
-Open `preview.svg` in a browser for fast layout iteration.
+Open `preview.svg` or `preview-all.html` in a browser for fast layout iteration.
