@@ -1,93 +1,109 @@
 # Weather Display for ESP32 E-Paper
 
-An always-on weather display built on the LilyGo T5 4.7" S3 E-Paper board (ESP32-S3, 960x540 pixels, 4-bit grayscale). The device connects to WiFi, fetches weather data from a Cloudflare Worker backend, renders the display, and enters deep sleep to conserve battery. It wakes every 10 minutes to refresh.
+An always-on weather display built on the LilyGo T5 4.7" S3 E-Paper board (ESP32-S3, 960x540 pixels, 4-bit grayscale). A Cloudflare Worker renders the weather UI as a grayscale PNG; the ESP32 fetches and displays it, waking from deep sleep every 5 minutes to check for updates.
 
-## Overview
+## Architecture
 
-The system has two components:
+```
+  OpenWeatherMap API
+        ↓
+  Cloudflare Worker (every 15 min)
+    ├─ /weather.json  (raw JSON, for legacy firmware)
+    └─ /weather.png   (960x540 grayscale PNG, server-rendered)
+        ↓
+  ESP32 (every 5 min wake)
+    ├─ fetch PNG → decode → display
+    ├─ battery overlay   ← drawn on-device
+    └─ staleness overlay ← drawn on-device
+        ↓
+  4.7" E-Paper Display
+```
 
-1. **ESP32 Firmware** (`src/`) -- Arduino-based firmware that drives the e-paper display. Connects to WiFi, fetches a JSON weather payload from the backend, renders temperature, weather icon, precipitation chart, UV index, moon phase, sunrise/sunset, and battery level onto the 960x540 display.
-
-2. **Cloudflare Worker** (`worker/`) -- A serverless backend that fetches weather data from WeatherAPI.com every 15 minutes via cron trigger, caches it in KV storage, and serves a simplified JSON response to the ESP32.
+All weather UI rendering happens on the server (JSX layout → satori → resvg → grayscale PNG). The ESP32 is a "dumb" display that fetches the PNG, composites a battery and staleness overlay in the bottom-right corner, and pushes it to the e-paper. If nothing has changed since the last wake, the display refresh is skipped to save power and avoid flicker.
 
 ## What the Display Shows
 
-- Current temperature (large font)
-- High/low temperatures for the day
-- Weather condition icon (sun, cloud, rain, snow, thunderstorm, fog, moon, partly cloudy)
-- UV index (current and daily high)
-- 24-hour precipitation probability chart with time markers at midnight, 6am, noon, 6pm
-- Moon phase icon (8 phases)
+- Current temperature (large) with high/low
+- Weather condition icon (Erik Flowers Weather Icons font)
+- UV index with custom sun icon (current + daily high)
+- 24-hour precipitation probability chart with real time axis labels
 - Sunrise and sunset times
-- Battery level indicator
-- Data staleness warning (shown when data is older than 30 minutes)
+- Battery level indicator (device-side overlay)
+- Data staleness warning when data is older than 30 minutes (device-side overlay)
 
 ## Project Structure
 
 ```
 weather-claude/
-├── src/             ESP32 firmware source code
-├── worker/          Cloudflare Worker backend
-├── tools/           Icon conversion and testing utilities
-├── platformio.ini   PlatformIO build configuration
-└── TODO.md          Project roadmap
+├── firmware-png/        ESP32 firmware: fetch PNG → decode → display (active)
+├── src/                 ESP32 firmware: fetch JSON → render on-device (legacy)
+├── firmware-png-test/   Disposable: embedded PNG decode smoke test
+├── worker/
+│   ├── src/             Cloudflare Worker API (routing, caching, providers)
+│   └── renderer/        Shared layout + local preview tooling
+├── tools/               Icon conversion utilities
+└── platformio.ini       PlatformIO config for legacy firmware
 ```
 
-### `src/` -- ESP32 Firmware
+### `firmware-png/` — Active Firmware
 
-The main firmware that runs on the LilyGo T5 4.7" S3 board. Built with PlatformIO and the Arduino framework. Uses the LilyGo-EPD47 library to drive the e-paper display. See [`src/README.md`](src/README.md) for details.
+The production firmware. Fetches `/weather.png` from the Worker, decodes with PNGdec, draws battery + staleness overlay, pushes to e-paper, deep sleeps for 5 minutes. Uses PNG hash in RTC memory for change detection.
 
-### `worker/` -- Cloudflare Worker Backend
+### `src/` — Legacy Firmware
 
-A serverless API that proxies and caches weather data from WeatherAPI.com. Runs on Cloudflare's edge network with KV storage for caching. See [`worker/README.md`](worker/README.md) for details.
+The original "smart" firmware that fetches `/weather.json` and renders the entire UI on-device. Kept for reference; may be retired once the PNG pipeline is fully proven.
 
-### `tools/` -- Utilities
+### `worker/` — Cloudflare Worker Backend
 
-Python scripts for converting PNG icon assets into C header files containing 4-bit grayscale bitmap arrays, plus an ESP32 test program for previewing icons on the physical display. See [`tools/README.md`](tools/README.md) for details.
+Server-side weather API + PNG rendering pipeline. See [`worker/README.md`](worker/README.md) for full documentation including setup-from-scratch instructions.
 
-### `platformio.ini`
+### `firmware-png-test/` — Smoke Test (Disposable)
 
-PlatformIO build configuration. Targets the `esp32-s3-devkitc-1` board with the espressif32 platform and Arduino framework. Configures PSRAM, USB CDC, and pulls in the LilyGo-EPD47 and ArduinoJson libraries.
+Minimal firmware that decodes an embedded PNG (no WiFi). Used to verify PNGdec + e-paper pipeline before building the network side. Can be deleted once no longer needed.
 
 ## Getting Started
 
 ### Prerequisites
 
 - [PlatformIO CLI](https://platformio.org/install/cli)
-- A LilyGo T5 4.7" S3 E-Paper board
-- A Cloudflare account (for the Worker backend)
-- A [WeatherAPI.com](https://www.weatherapi.com/) API key
-
-### ESP32 Setup
-
-1. Copy the WiFi config template and fill in your credentials:
-   ```
-   cp src/wifi_config.h.template src/wifi_config.h
-   ```
-
-2. Build and flash:
-   ```
-   pio run -t upload --upload-port /dev/cu.usbmodem2101
-   ```
-
-3. Monitor serial output:
-   ```
-   pio device monitor --port /dev/cu.usbmodem2101 --baud 115200
-   ```
+- LilyGo T5 4.7" S3 E-Paper board
+- Cloudflare account with Workers Paid plan ($5/mo)
+- [OpenWeatherMap](https://openweathermap.org/api/one-call-3) API key (One Call 3.0, free tier)
 
 ### Worker Setup
 
-1. Install dependencies:
-   ```
-   cd worker && npm install
+```bash
+cd worker && npm install
+cd renderer && npm install   # also downloads fonts
+npx wrangler kv:namespace create WEATHER_KV   # paste ID into wrangler.toml
+npx wrangler secret put WEATHER_API_KEY       # paste your OWM key
+npm run deploy
+```
+
+### ESP32 Setup
+
+1. Create WiFi config:
+   ```bash
+   # Edit firmware-png/include/wifi_config.h with your WiFi credentials
+   # (see template comments in the file)
    ```
 
-2. Set your API key:
-   ```
-   wrangler secret put WEATHER_API_KEY
+2. Build and flash:
+   ```bash
+   cd firmware-png
+   pio run -t upload
    ```
 
-3. Deploy:
+3. Monitor serial output:
+   ```bash
+   pio device monitor --baud 115200
    ```
-   wrangler deploy
-   ```
+
+### Local Layout Preview
+
+```bash
+cd worker/renderer
+npm run preview          # renders preview.svg + preview.png from sample data
+```
+
+Open `preview.svg` in a browser for fast layout iteration.
