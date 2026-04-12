@@ -1,36 +1,30 @@
 import { createProvider } from './providers/index.js';
+import { renderWeatherPng } from './render.jsx';
 
 /**
  * Cloudflare Worker for weather data
  *
  * Handles:
- * 1. HTTP GET /weather.json - Serve cached weather data to ESP32
- * 2. Scheduled cron - Fetch fresh weather data every 15 minutes
+ * 1. HTTP GET /weather.json - Serve cached weather JSON to ESP32
+ * 2. HTTP GET /weather.png  - Serve rendered weather PNG for e-paper display
+ * 3. Scheduled cron - Fetch fresh data + render PNG every 15 minutes
  */
 
 export default {
   /**
    * HTTP request handler
-   * Serves cached weather data from KV storage
    */
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
     // Handle /weather.json endpoint
     if (url.pathname === '/weather.json') {
-      // Get cached data from KV
       const cachedData = await env.WEATHER_KV.get('current', 'json');
 
       if (!cachedData) {
-        // No cached data yet, fetch fresh data
         try {
           const weatherData = await fetchWeatherData(env);
-
-          // Store in KV so next request uses cached data
-          await env.WEATHER_KV.put('current', JSON.stringify(weatherData), {
-            expirationTtl: 3600 // 1 hour
-          });
-
+          await storeWeatherData(env, weatherData);
           return jsonResponse(weatherData);
         } catch (error) {
           return jsonResponse({ error: 'Failed to fetch weather data' }, 500);
@@ -40,13 +34,40 @@ export default {
       return jsonResponse(cachedData);
     }
 
-    // Handle root path - show info
+    // Handle /weather.png endpoint — rendered e-paper image
+    if (url.pathname === '/weather.png') {
+      try {
+        // Try cached PNG first.
+        const [cachedPng, cachedUpdated] = await Promise.all([
+          env.WEATHER_KV.get('render_png', 'arrayBuffer'),
+          env.WEATHER_KV.get('render_updated', 'text'),
+        ]);
+
+        if (cachedPng) {
+          return pngResponse(cachedPng, cachedUpdated || '');
+        }
+
+        // Cache miss — fetch weather, render, cache, and serve.
+        const weatherData = await fetchWeatherData(env);
+        await storeWeatherData(env, weatherData);
+
+        const png = await renderWeatherPng(weatherData);
+        await storeRenderedPng(env, png, weatherData.updated);
+
+        return pngResponse(png, weatherData.updated);
+      } catch (error) {
+        return new Response(`Render failed: ${error.message}`, { status: 500 });
+      }
+    }
+
+    // Root info page
     if (url.pathname === '/') {
       return new Response(`
         <h1>Weather API for ESP32</h1>
         <p>Endpoints:</p>
         <ul>
           <li><a href="/weather.json">/weather.json</a> - Current weather data</li>
+          <li><a href="/weather.png">/weather.png</a> - Rendered e-paper PNG (960x540 grayscale)</li>
         </ul>
         <p>Provider: ${env.WEATHER_PROVIDER || 'weatherapi'}</p>
         <p>Location: ${env.WEATHER_LOCATION || 'Manhattan'}</p>
@@ -60,28 +81,46 @@ export default {
 
   /**
    * Scheduled handler (cron trigger)
-   * Fetches fresh weather data and updates KV cache
+   * Fetches fresh weather data, renders PNG, and updates KV cache.
    */
   async scheduled(event, env, ctx) {
     try {
       console.log('Scheduled weather fetch triggered');
       const weatherData = await fetchWeatherData(env);
+      await storeWeatherData(env, weatherData);
 
-      // Store in KV with 1-hour expiration
-      await env.WEATHER_KV.put('current', JSON.stringify(weatherData), {
-        expirationTtl: 3600 // 1 hour
-      });
+      console.log('Rendering weather PNG...');
+      const png = await renderWeatherPng(weatherData);
+      await storeRenderedPng(env, png, weatherData.updated);
 
-      console.log('Weather data updated successfully');
+      console.log(`Weather data + PNG updated (${png.length} bytes)`);
     } catch (error) {
-      console.error('Failed to fetch weather data:', error);
+      console.error('Failed to update weather data:', error);
     }
   }
 };
 
-/**
- * Fetch weather data from configured provider
- */
+// ─── KV helpers ──────────────────────────────────────────────────────────────
+
+const KV_TTL = 3600; // 1 hour
+
+/** Store weather JSON in KV. */
+async function storeWeatherData(env, weatherData) {
+  await env.WEATHER_KV.put('current', JSON.stringify(weatherData), {
+    expirationTtl: KV_TTL,
+  });
+}
+
+/** Store the rendered PNG and its timestamp in KV. */
+async function storeRenderedPng(env, pngBytes, updated) {
+  await Promise.all([
+    env.WEATHER_KV.put('render_png', pngBytes, { expirationTtl: KV_TTL }),
+    env.WEATHER_KV.put('render_updated', updated, { expirationTtl: KV_TTL }),
+  ]);
+}
+
+// ─── weather data ────────────────────────────────────────────────────────────
+
 async function fetchWeatherData(env) {
   const providerName = env.WEATHER_PROVIDER || 'weatherapi';
   const apiKey = env.WEATHER_API_KEY;
@@ -95,16 +134,26 @@ async function fetchWeatherData(env) {
   return await provider.fetch();
 }
 
-/**
- * Helper to create JSON response with CORS headers
- */
+// ─── response helpers ────────────────────────────────────────────────────────
+
 function jsonResponse(data, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
     status,
     headers: {
       'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*', // Allow ESP32 to fetch
-      'Cache-Control': 'public, max-age=300' // Cache for 5 minutes
-    }
+      'Access-Control-Allow-Origin': '*',
+      'Cache-Control': 'public, max-age=300',
+    },
+  });
+}
+
+function pngResponse(pngBytes, updated) {
+  return new Response(pngBytes, {
+    headers: {
+      'Content-Type': 'image/png',
+      'X-Updated': updated,
+      'Cache-Control': 'public, max-age=300',
+      'Access-Control-Allow-Origin': '*',
+    },
   });
 }

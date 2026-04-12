@@ -1,6 +1,23 @@
 name = "weather-esp32"
 main = "src/index.js"
-compatibility_date = "2024-01-01"
+compatibility_date = "2024-09-23"
+
+# nodejs_compat: satori's yoga-wasm module references `process.env` at load
+# time, which doesn't exist in the default Workers runtime. This flag
+# polyfills Node.js built-in modules including `process`.
+compatibility_flags = ["nodejs_compat"]
+
+# Module rules — tell wrangler how to import non-JS file types.
+# "Data" imports return an ArrayBuffer at runtime.
+[[rules]]
+type = "Data"
+globs = ["**/*.png", "**/*.ttf"]
+fallthrough = true
+
+[[rules]]
+type = "CompiledWasm"
+globs = ["**/*.wasm"]
+fallthrough = true
 
 # KV namespace for caching weather data
 [[kv_namespaces]]

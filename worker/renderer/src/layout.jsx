@@ -17,6 +17,11 @@
 //      works, but that only helps for literals. For dynamic numbers, always
 //      stringify: `<div>{String(x)}</div>` or embed them in a template literal.
 //
+// React import: tsx (used by npm run preview) auto-injects this, but
+// wrangler's esbuild classic JSX transform needs it explicitly in scope.
+// eslint-disable-next-line no-unused-vars
+import React from 'react';
+
 // ─── shared layout constants ─────────────────────────────────────────────────
 
 const WIDTH = 960;
