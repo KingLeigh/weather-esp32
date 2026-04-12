@@ -80,25 +80,61 @@ export default {
   },
 
   /**
-   * Scheduled handler (cron trigger)
-   * Fetches fresh weather data, renders PNG, and updates KV cache.
+   * Scheduled handler (cron trigger, every 3 minutes)
+   *
+   * Fetches weather data on every cycle so the `updated` timestamp stays
+   * fresh (the device uses it for staleness detection). But the expensive
+   * satori+resvg render is skipped if the weather data hasn't actually
+   * changed since the last render — a simple JSON hash comparison.
    */
   async scheduled(event, env, ctx) {
     try {
       console.log('Scheduled weather fetch triggered');
       const weatherData = await fetchWeatherData(env);
+
+      // Always store the JSON (refreshes `updated` timestamp + KV TTL).
       await storeWeatherData(env, weatherData);
 
-      console.log('Rendering weather PNG...');
-      const png = await renderWeatherPng(weatherData);
-      await storeRenderedPng(env, png, weatherData.updated);
+      // Hash the weather-relevant fields (everything except `updated`,
+      // which changes every cycle). Skip the render if unchanged.
+      const dataForHash = { ...weatherData, updated: undefined };
+      const newHash = simpleHash(JSON.stringify(dataForHash));
+      const prevHash = await env.WEATHER_KV.get('render_hash', 'text');
 
-      console.log(`Weather data + PNG updated (${png.length} bytes)`);
+      if (prevHash === newHash) {
+        // Data unchanged — refresh the PNG's timestamp + TTL without
+        // re-rendering. The device sees a fresh `X-Updated` header.
+        console.log('Weather unchanged — refreshing timestamp only');
+        await env.WEATHER_KV.put('render_updated', weatherData.updated, {
+          expirationTtl: KV_TTL,
+        });
+        return;
+      }
+
+      console.log('Weather changed — rendering PNG...');
+      const png = await renderWeatherPng(weatherData);
+      await Promise.all([
+        storeRenderedPng(env, png, weatherData.updated),
+        env.WEATHER_KV.put('render_hash', newHash, { expirationTtl: KV_TTL }),
+      ]);
+
+      console.log(`PNG updated (${png.length} bytes, hash=${newHash})`);
     } catch (error) {
       console.error('Failed to update weather data:', error);
     }
   }
 };
+
+// ─── hashing ─────────────────────────────────────────────────────────────────
+
+/** djb2 string hash — fast, deterministic, good enough for change detection. */
+function simpleHash(str) {
+  let h = 5381;
+  for (let i = 0; i < str.length; i++) {
+    h = ((h << 5) + h) ^ str.charCodeAt(i);
+  }
+  return (h >>> 0).toString(16);
+}
 
 // ─── KV helpers ──────────────────────────────────────────────────────────────
 
