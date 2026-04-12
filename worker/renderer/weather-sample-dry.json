@@ -1,0 +1,31 @@
+{
+  "temperature": {
+    "current": 72,
+    "high": 78,
+    "low": 61
+  },
+  "weather": "sunny",
+  "rain_chance": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  "snow_chance": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  "hourly_temp": [72, 73, 75, 77, 78, 78, 77, 75, 73, 71, 69, 67, 65, 64, 63, 62, 61, 61, 62, 63, 65, 67, 69, 71],
+  "rain_mm": 0,
+  "snow_mm": 0,
+  "uv": {
+    "current": 6,
+    "high": 9
+  },
+  "sun": {
+    "sunrise": "06:45 AM",
+    "sunset": "07:28 PM"
+  },
+  "moon": {
+    "illumination": 68,
+    "phase": "Waxing Gibbous"
+  },
+  "wind": {
+    "mph": 12,
+    "dir": "NW"
+  },
+  "is_day": true,
+  "updated": "2026-04-11T14:30:00"
+}

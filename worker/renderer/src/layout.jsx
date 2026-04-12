@@ -206,7 +206,7 @@ function Hero({ data }) {
         display: 'flex',
         flexDirection: 'row',
         alignItems: 'flex-start',
-        padding: `28px ${PAGE_PADDING_X}px 12px ${PAGE_PADDING_X}px`,
+        padding: `32px ${PAGE_PADDING_X}px 20px ${PAGE_PADDING_X}px`,
       }}
     >
       {/* Left: weather icon */}
@@ -216,86 +216,78 @@ function Hero({ data }) {
         size={180}
       />
 
-      {/* Center: temp row (big current temp + UV block) and H/L beneath */}
+      {/* Center: current temp, H/L stack, and UV block on one row */}
       <div
         style={{
           display: 'flex',
-          flexDirection: 'column',
+          flexDirection: 'row',
+          alignItems: 'flex-start',
           marginLeft: 28,
           flexGrow: 1,
         }}
       >
         <div
           style={{
-            display: 'flex',
-            flexDirection: 'row',
-            alignItems: 'flex-start',
+            fontSize: 180,
+            lineHeight: 0.9,
+            fontWeight: 700,
+            color: FG,
           }}
         >
-          <div
-            style={{
-              fontSize: 180,
-              lineHeight: 0.9,
-              fontWeight: 700,
-              color: FG,
-            }}
-          >
-            {`${data.temperature.current}°`}
-          </div>
-
-          {/* UV block: [sun icon] [big current] [smaller max], all on a
-              shared baseline/center line. `marginLeft: auto` pushes the
-              whole block to the right edge of the temp row, which (because
-              the temp row stretches across the center column and the center
-              column grows to fill the Hero) lands flush with the Hero's
-              right padding — i.e., the right edge of the display. */}
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'row',
-              alignItems: 'center',
-              marginLeft: 'auto',
-              marginTop: 24,
-            }}
-          >
-            <SunIcon size={64} label="UV" />
-            <div
-              style={{
-                fontSize: 120,
-                fontWeight: 700,
-                color: FG,
-                lineHeight: 0.9,
-                marginLeft: 12,
-              }}
-            >
-              {String(data.uv.current)}
-            </div>
-            <div
-              style={{
-                fontSize: 56,
-                fontWeight: 600,
-                color: FG_MUTED,
-                lineHeight: 0.9,
-                marginLeft: 10,
-              }}
-            >
-              {String(data.uv.high)}
-            </div>
-          </div>
+          {`${data.temperature.current}°`}
         </div>
 
+        {/* H/L stacked vertically, between current temp and UV */}
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'center',
+            marginLeft: 20,
+            alignSelf: 'center',
+            fontSize: 48,
+            fontWeight: 700,
+            color: FG_MUTED,
+            lineHeight: 1.2,
+          }}
+        >
+          <div>{`H ${data.temperature.high}°`}</div>
+          <div>{`L ${data.temperature.low}°`}</div>
+        </div>
+
+        {/* UV block pushed to right edge */}
         <div
           style={{
             display: 'flex',
             flexDirection: 'row',
-            fontSize: 40,
-            fontWeight: 700,
-            color: FG_MUTED,
-            marginTop: 14,
+            alignItems: 'center',
+            marginLeft: 'auto',
+            marginTop: 24,
           }}
         >
-          <div>{`H ${data.temperature.high}°`}</div>
-          <div style={{ marginLeft: 28 }}>{`L ${data.temperature.low}°`}</div>
+          <SunIcon size={64} label="UV" />
+          <div
+            style={{
+              fontSize: 120,
+              fontWeight: 700,
+              color: FG,
+              lineHeight: 0.9,
+              marginLeft: 12,
+            }}
+          >
+            {String(data.uv.current)}
+          </div>
+          <div
+            style={{
+              fontSize: 56,
+              fontWeight: 600,
+              color: FG_MUTED,
+              lineHeight: 0.9,
+              marginLeft: 10,
+            }}
+          >
+            {String(data.uv.high)}
+          </div>
         </div>
       </div>
 
@@ -327,21 +319,25 @@ function computeAxisLabels(nowHour, nowMinute, chartW) {
 
   const labelForHour = (h) => {
     const hh = ((h % 24) + 24) % 24;
-    if (hh === 0 || hh === 12) return '12';
-    return hh < 12 ? String(hh) : String(hh - 12);
+    if (hh === 0) return '00';
+    if (hh === 6) return '6a';
+    if (hh === 12) return '12';
+    if (hh === 18) return '6p';
+    return hh < 12 ? `${hh}a` : `${hh - 12}p`;
   };
 
   const out = [];
   while (boundary < windowEnd) {
     const x = ((boundary - nowMinutes) / (24 * 60)) * chartW;
     const hourOfDay = (boundary / 60) % 24;
-    out.push({ x, label: labelForHour(hourOfDay) });
+    const isMajor = hourOfDay === 0 || hourOfDay === 12; // midnight or noon
+    out.push({ x, label: labelForHour(hourOfDay), isMajor });
     boundary += boundaryStep;
   }
   return out;
 }
 
-const PRECIP_CHART_TITLE = '24-HOUR PRECIPITATION %';
+const PRECIP_CHART_TITLE = '24H PRECIP';
 
 // Threshold: show precip chart if any hour has >= this % chance.
 const PRECIP_THRESHOLD = 5;
@@ -362,7 +358,7 @@ function AxisLabels({ chartW, updated }) {
         position: 'relative',
         width: chartW,
         height: 22,
-        marginTop: 4,
+        marginTop: 8,
       }}
     >
       {axisLabels.map(({ x, label: lbl }) => (
@@ -386,6 +382,34 @@ function AxisLabels({ chartW, updated }) {
   );
 }
 
+// ─── shared chart gridlines (vertical lines at 6-hour boundaries) ───────────
+
+const GRIDLINE_MAJOR = '#888';  // midnight, noon — one shade darker
+const GRIDLINE_MINOR = '#999';  // everything else (6am/6pm, horizontals)
+
+function chartGridlines(chartW, chartH, updated, yTop, yBottom) {
+  // yTop / yBottom define the drawable region within the chart; gridlines
+  // are clipped to this range so they intersect cleanly with horizontal
+  // reference lines. Defaults to full chart height if not provided.
+  const y1 = yTop ?? 0;
+  const y2 = yBottom ?? chartH - 4;
+  const { hour: nowHour, minute: nowMinute } = parseLocalHourMinute(updated);
+  const labels = computeAxisLabels(nowHour, nowMinute, chartW);
+
+  return labels.map(({ x, isMajor }, i) => (
+    <line
+      key={`g${i}`}
+      x1={x}
+      y1={y1}
+      x2={x}
+      y2={y2}
+      stroke={isMajor ? GRIDLINE_MAJOR : GRIDLINE_MINOR}
+      strokeWidth={1}
+      shapeRendering="crispEdges"
+    />
+  ));
+}
+
 // ─── temperature chart ──────────────────────────────────────────────────────
 
 function TempChart({ data }) {
@@ -394,18 +418,28 @@ function TempChart({ data }) {
   const chartH = 164;
   const n = hourly_temp.length;
   const strokeW = 3;
-  const padTop = 24;    // room for top temp label
-  const padBottom = 24; // room for bottom temp label
-  const usableH = chartH - padTop - padBottom;
 
-  // Auto-scale to the data range with a small buffer.
+  // Auto-scale: round outward to the nearest step so gridlines land on
+  // round numbers. Use 5° steps for narrow ranges, 10° for wider ones.
+  // The rounded scale provides natural breathing room above and below
+  // the data since scaleMin < minTemp and scaleMax > maxTemp.
   const minTemp = Math.min(...hourly_temp);
   const maxTemp = Math.max(...hourly_temp);
-  const range = maxTemp - minTemp || 1; // avoid division by zero
+  const rawRange = maxTemp - minTemp;
+  const step = rawRange <= 10 ? 5 : 10;
+  const scaleMin = Math.floor(minTemp / step) * step;
+  const scaleMax = Math.ceil(maxTemp / step) * step;
+  const range = scaleMax - scaleMin || 1;
+
+  // Small inset so gridlines at 0% and 100% aren't clipped at SVG edges.
+  const inset = 2;
+  const usableH = chartH - 2 * inset;
+
+  const yForTemp = (t) => inset + usableH - ((t - scaleMin) / range) * usableH;
 
   const points = hourly_temp.map((t, i) => {
     const x = n === 1 ? 0 : (i / (n - 1)) * chartW;
-    const y = padTop + usableH - ((t - minTemp) / range) * usableH;
+    const y = yForTemp(t);
     return [x, y];
   });
 
@@ -442,7 +476,7 @@ function TempChart({ data }) {
     const ceil = Math.min(floor + 1, n - 1);
     const frac = idx - floor;
     const t = hourly_temp[floor] * (1 - frac) + hourly_temp[ceil] * frac;
-    return padTop + usableH - ((t - minTemp) / range) * usableH;
+    return yForTemp(t);
   };
 
   return (
@@ -450,22 +484,20 @@ function TempChart({ data }) {
       style={{
         display: 'flex',
         flexDirection: 'column',
-        padding: `18px ${PAGE_PADDING_X}px 0 ${PAGE_PADDING_X}px`,
+        padding: `10px ${PAGE_PADDING_X}px 0 ${PAGE_PADDING_X}px`,
       }}
     >
       <div
         style={{
           display: 'flex',
           flexDirection: 'row',
-          fontSize: 24,
-          fontWeight: 600,
+          alignItems: 'baseline',
           color: FG_MUTED,
-          letterSpacing: 1.5,
-          marginBottom: 8,
+          marginBottom: 18,
         }}
       >
-        <div>{'24-HOUR TEMPERATURE'}</div>
-        <div style={{ marginLeft: 'auto', letterSpacing: 0, fontSize: 28, fontWeight: 700 }}>
+        <div style={{ fontSize: 24, fontWeight: 600, letterSpacing: 1.5 }}>{'24H TEMP'}</div>
+        <div style={{ marginLeft: 'auto', letterSpacing: 0, fontSize: 42, fontWeight: 700 }}>
           {'No umbrella needed!'}
         </div>
       </div>
@@ -480,6 +512,27 @@ function TempChart({ data }) {
         }}
       >
         <svg width={chartW} height={chartH} style={{ position: 'absolute', left: 0, top: 0 }}>
+          {chartGridlines(chartW, chartH, updated, inset, inset + usableH)}
+          {/* Horizontal reference lines at each step increment */}
+          {(() => {
+            const lines = [];
+            for (let t = scaleMin; t <= scaleMax; t += step) {
+              const y = yForTemp(t);
+              lines.push(
+                <line
+                  key={`ht${t}`}
+                  x1={0}
+                  y1={y}
+                  x2={chartW}
+                  y2={y}
+                  stroke={GRIDLINE_MINOR}
+                  strokeWidth={1}
+                  shapeRendering="crispEdges"
+                />
+              );
+            }
+            return lines;
+          })()}
           <polyline
             points={lineStr}
             stroke={FG}
@@ -552,9 +605,9 @@ function PrecipChart({ data }) {
   const hasSnow = snow_chance.some((p) => p >= 5);
 
   // Chart title: adapt to what's showing.
-  const label = hasSnow && !hasRain ? '24-HOUR SNOW %'
-    : hasSnow && hasRain ? '24-HOUR RAIN + SNOW %'
-    : PRECIP_CHART_TITLE;
+  const label = hasSnow && hasRain ? '24H PRECIP %'
+    : hasSnow ? '24H SNOW %'
+    : '24H RAIN %';
 
   // Right-aligned summary.
   let summary = '';
@@ -596,23 +649,21 @@ function PrecipChart({ data }) {
       style={{
         display: 'flex',
         flexDirection: 'column',
-        padding: `18px ${PAGE_PADDING_X}px 0 ${PAGE_PADDING_X}px`,
+        padding: `10px ${PAGE_PADDING_X}px 0 ${PAGE_PADDING_X}px`,
       }}
     >
       <div
         style={{
           display: 'flex',
           flexDirection: 'row',
-          fontSize: 24,
-          fontWeight: 600,
+          alignItems: 'baseline',
           color: FG_MUTED,
-          letterSpacing: 1.5,
-          marginBottom: 8,
+          marginBottom: 18,
         }}
       >
-        <div>{label}</div>
+        <div style={{ fontSize: 24, fontWeight: 600, letterSpacing: 1.5 }}>{label}</div>
         {summary && (
-          <div style={{ marginLeft: 'auto', letterSpacing: 0 }}>
+          <div style={{ marginLeft: 'auto', letterSpacing: 0, fontSize: 42, fontWeight: 700 }}>
             {summary}
           </div>
         )}
@@ -630,6 +681,23 @@ function PrecipChart({ data }) {
         }}
       >
         <svg width={chartW} height={chartH}>
+          {chartGridlines(chartW, chartH, updated, padTop, padTop + usableH)}
+          {/* Horizontal reference lines at 25%, 50%, 75%, 100% */}
+          {[25, 50, 75, 100].map((pct) => {
+            const y = padTop + usableH - (pct / 100) * usableH;
+            return (
+              <line
+                key={`h${pct}`}
+                x1={0}
+                y1={y}
+                x2={chartW}
+                y2={y}
+                stroke={GRIDLINE_MINOR}
+                strokeWidth={1}
+                shapeRendering="crispEdges"
+              />
+            );
+          })}
           {/* Rain bars (light grey, behind) */}
           {rainBars.map((bar, i) => (
             bar.h > 0 && (
@@ -672,16 +740,11 @@ function Footer({ data }) {
       style={{
         display: 'flex',
         flexDirection: 'row',
-        alignItems: 'flex-start',
-        padding: `6px ${PAGE_PADDING_X}px 12px ${PAGE_PADDING_X}px`,
+        alignItems: 'center',
+        padding: `4px ${PAGE_PADDING_X}px 8px ${PAGE_PADDING_X}px`,
       }}
     >
-      {/* TODO: moon phase will go somewhere later — Erik Flowers has
-          wi_moon_* glyphs we can use. Layout position TBD. */}
-
-      {/* TODO: sunrise/sunset — removed to free up space. Add back when
-          layout has room, possibly as small text in the footer or as
-          part of a sun/moon row. */}
+      {/* TODO: moon phase, sunrise/sunset could go here in future */}
 
       {/*
        * ⚠️ RESERVED REGION — DO NOT DRAW HERE ⚠️
