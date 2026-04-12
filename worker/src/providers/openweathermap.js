@@ -40,6 +40,7 @@ export class OpenWeatherMapProvider extends WeatherProvider {
     // will overlay snow on top of rain).
     const rain_chance = [];
     const snow_chance = [];
+    const hourly_temp = [];
 
     for (let i = 0; i < 24 && i < hourly.length; i++) {
       const h = hourly[i];
@@ -62,6 +63,8 @@ export class OpenWeatherMapProvider extends WeatherProvider {
         rain_chance.push(pop);
         snow_chance.push(0);
       }
+
+      hourly_temp.push(Math.round(h.temp));
     }
 
     // Map weather condition to our icon types
@@ -95,6 +98,7 @@ export class OpenWeatherMapProvider extends WeatherProvider {
       weather: weatherIcon,
       rain_chance,
       snow_chance,
+      hourly_temp,
       rain_mm: Math.round((daily.rain || 0) * 10) / 10,   // daily total in mm
       snow_mm: Math.round((daily.snow || 0) * 10) / 10,   // daily total in mm
       uv: {
