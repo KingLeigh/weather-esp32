@@ -296,26 +296,19 @@ function Hero({ data }) {
   );
 }
 
-// Extract (hour, minute) from an ISO-ish timestamp string like
-// "2026-04-11T14:30:00". We don't use Date parsing because that introduces
-// timezone ambiguity between Node/Workers runtimes. The Worker is expected to
-// format `updated` as the user's local time (see memory notes).
-function parseLocalHourMinute(updated) {
-  const m = /T(\d{2}):(\d{2})/.exec(updated ?? '');
-  if (!m) return { hour: 0, minute: 0 };
-  return { hour: parseInt(m[1], 10), minute: parseInt(m[2], 10) };
+// Extract the hour from an ISO-ish timestamp like "2026-04-11T14:30:00".
+// Minutes are ignored — the chart aligns to hourly buckets matching the data
+// granularity, so axis labels and gridlines land on exact bar edges.
+function parseLocalHour(updated) {
+  const m = /T(\d{2})/.exec(updated ?? '');
+  return m ? parseInt(m[1], 10) : 0;
 }
 
-// Given local hour/minute of "now", compute the chart x positions and labels
-// for every 6-hour clock boundary (00:00, 06:00, 12:00, 18:00) that falls
-// within the 24-hour window [now, now + 24h].
-function computeAxisLabels(nowHour, nowMinute, chartW) {
-  const nowMinutes = nowHour * 60 + nowMinute;
-  const windowEnd = nowMinutes + 24 * 60;
-  const boundaryStep = 6 * 60;
-
-  // First boundary strictly after `now`: smallest multiple of 360 that's > nowMinutes.
-  let boundary = Math.floor(nowMinutes / boundaryStep) * boundaryStep + boundaryStep;
+// Compute chart x positions and labels for every 6-hour clock boundary
+// (00:00, 06:00, 12:00, 18:00) in the 24-hour window starting at nowHour.
+// Each hour occupies exactly chartW/24 pixels.
+function computeAxisLabels(nowHour, chartW) {
+  const slotW = chartW / 24;
 
   const labelForHour = (h) => {
     const hh = ((h % 24) + 24) % 24;
@@ -327,12 +320,15 @@ function computeAxisLabels(nowHour, nowMinute, chartW) {
   };
 
   const out = [];
-  while (boundary < windowEnd) {
-    const x = ((boundary - nowMinutes) / (24 * 60)) * chartW;
-    const hourOfDay = (boundary / 60) % 24;
-    const isMajor = hourOfDay === 0 || hourOfDay === 12; // midnight or noon
-    out.push({ x, label: labelForHour(hourOfDay), isMajor });
-    boundary += boundaryStep;
+  // First 6-hour boundary strictly after nowHour.
+  let h = Math.floor(nowHour / 6) * 6 + 6;
+  while (h < nowHour + 24) {
+    const slot = h - nowHour;
+    const x = slot * slotW;
+    const hh = h % 24;
+    const isMajor = hh === 0 || hh === 12;
+    out.push({ x, label: labelForHour(hh), isMajor });
+    h += 6;
   }
   return out;
 }
@@ -346,8 +342,8 @@ const AXIS_LABEL_W = 50;
 // ─── shared axis labels (used by both chart types) ──────────────────────────
 
 function AxisLabels({ chartW, updated }) {
-  const { hour: nowHour, minute: nowMinute } = parseLocalHourMinute(updated);
-  const axisLabels = computeAxisLabels(nowHour, nowMinute, chartW);
+  const nowHour = parseLocalHour(updated);
+  const axisLabels = computeAxisLabels(nowHour, chartW);
 
   return (
     <div
@@ -391,8 +387,8 @@ function chartGridlines(chartW, chartH, updated, yTop, yBottom) {
   // reference lines. Defaults to full chart height if not provided.
   const y1 = yTop ?? 0;
   const y2 = yBottom ?? chartH - 4;
-  const { hour: nowHour, minute: nowMinute } = parseLocalHourMinute(updated);
-  const labels = computeAxisLabels(nowHour, nowMinute, chartW);
+  const nowHour = parseLocalHour(updated);
+  const labels = computeAxisLabels(nowHour, chartW);
 
   return labels.map(({ x, isMajor }, i) => (
     <line
@@ -604,39 +600,49 @@ function PrecipChart({ data, hasRain, hasSnow }) {
     : hasSnow ? '24H SNOW %'
     : '24H RAIN %';
 
-  // Right-aligned summary.
+  // Right-aligned summary describing the precipitation outlook.
+  //
+  // Logic per type (rain / snow):
+  //   - Currently active → "Rain until Xpm" (find first hour that drops below
+  //     threshold). If it never drops, just "Rain now".
+  //   - Not active yet → "Rain from Xpm" (first hour above threshold).
+  // Amounts appended as "· X.XX" total" when > 0.
+
+  const formatHour = (hourOffset) => {
+    const nowH = parseLocalHour(updated);
+    const h24 = (nowH + hourOffset) % 24;
+    const h12 = h24 === 0 ? 12 : h24 > 12 ? h24 - 12 : h24;
+    const ap = h24 < 12 ? 'am' : 'pm';
+    return `${h12}${ap}`;
+  };
+
+  const describePrecip = (chances, label) => {
+    const isNow = chances[0] >= PRECIP_THRESHOLD;
+    if (isNow) {
+      // Find when it stops (first hour below threshold).
+      const stopIdx = chances.findIndex((p) => p < PRECIP_THRESHOLD);
+      if (stopIdx === -1) return `${label} now`;
+      return `${label} until ${formatHour(stopIdx)}`;
+    }
+    // Find when it starts.
+    const startIdx = chances.findIndex((p) => p >= PRECIP_THRESHOLD);
+    return `${label} from ${formatHour(startIdx)}`;
+  };
+
   let summary = '';
   if (!hasRain && !hasSnow) {
     summary = 'No precipitation for 24 hrs';
+  } else if (hasRain && hasSnow) {
+    // Both present — keep it short, the chart shows timing visually.
+    const totalIn = (data.rain_in || 0) + (data.snow_in || 0);
+    summary = totalIn > 0 ? `Rain + Snow · ${String(totalIn)}" total` : 'Rain + Snow';
   } else {
-    const parts = [];
-    if (hasRain) {
-      const firstIdx = rain_chance.findIndex((p) => p >= 5);
-      if (firstIdx === 0) {
-        parts.push(`Rain now`);
-      } else {
-        const { hour: nowH } = parseLocalHourMinute(updated);
-        const startHour = (nowH + firstIdx) % 24;
-        const h12 = startHour === 0 ? 12 : startHour > 12 ? startHour - 12 : startHour;
-        const ap = startHour < 12 ? 'am' : 'pm';
-        parts.push(`Rain at ${h12}${ap}`);
-      }
-      if (data.rain_in > 0) parts.push(`${String(data.rain_in)}"`);
-    }
-    if (hasSnow) {
-      const firstIdx = snow_chance.findIndex((p) => p >= 5);
-      if (firstIdx === 0) {
-        parts.push(`Snow now`);
-      } else {
-        const { hour: nowH } = parseLocalHourMinute(updated);
-        const startHour = (nowH + firstIdx) % 24;
-        const h12 = startHour === 0 ? 12 : startHour > 12 ? startHour - 12 : startHour;
-        const ap = startHour < 12 ? 'am' : 'pm';
-        parts.push(`Snow at ${h12}${ap}`);
-      }
-      if (data.snow_in > 0) parts.push(`${String(data.snow_in)}"`);
-    }
-    summary = parts.join(' · ');
+    // Single type — room for full timing description.
+    const desc = hasRain
+      ? describePrecip(rain_chance, 'Rain')
+      : describePrecip(snow_chance, 'Snow');
+    const amount = hasRain ? data.rain_in : data.snow_in;
+    summary = amount > 0 ? `${desc} · ${String(amount)}" total` : desc;
   }
 
   return (
