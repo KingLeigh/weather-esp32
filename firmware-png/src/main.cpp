@@ -130,10 +130,30 @@ static bool connectWiFi() {
     IPAddress sn = WiFi.subnetMask();
     WiFi.config(ip, gw, sn, IPAddress(8,8,8,8), IPAddress(1,1,1,1));
 
-    // NTP sync — needed for staleness calculation.
+    // NTP sync — needed for staleness calculation. configTime() is async;
+    // we must wait for it to resolve before disconnecting WiFi, otherwise
+    // time() returns a stale value from the last boot and the staleness
+    // calculation drifts further behind on each deep sleep cycle.
     configTime(0, 0, "pool.ntp.org", "time.nist.gov");
     setenv("TZ", "EST5EDT,M3.2.0,M11.1.0", 1);
     tzset();
+
+    Serial.print("Waiting for NTP sync");
+    unsigned long ntpStart = millis();
+    struct tm ti;
+    while (!getLocalTime(&ti, 0) && millis() - ntpStart < 5000) {
+        delay(100);
+        Serial.print(".");
+    }
+    if (getLocalTime(&ti, 0)) {
+        Serial.printf(" OK (%lu ms)  %04d-%02d-%02dT%02d:%02d:%02d\n",
+                      millis() - ntpStart,
+                      ti.tm_year + 1900, ti.tm_mon + 1, ti.tm_mday,
+                      ti.tm_hour, ti.tm_min, ti.tm_sec);
+    } else {
+        Serial.printf(" TIMEOUT after %lu ms — staleness may be inaccurate\n",
+                      millis() - ntpStart);
+    }
 
     return true;
 }
@@ -382,9 +402,6 @@ void setup() {
     bool fetchOk = false;
     if (connectWiFi()) {
         fetchOk = fetchPng();
-        // Keep WiFi on briefly for NTP sync (needed for staleness calc).
-        // NTP was initiated in connectWiFi(); give it a moment to resolve.
-        if (fetchOk) delay(500);
         disconnectWiFi();
     } else {
         Serial.println("WiFi failed");
