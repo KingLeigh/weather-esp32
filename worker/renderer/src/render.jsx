@@ -76,27 +76,3 @@ export async function renderSvg(data) {
     pixels: rendered.pixels, // Uint8Array, RGBA, row-major
   };
 }
-
-/**
- * Render a weather frame to an RGBA PNG (convenience wrapper).
- * The Cloudflare Worker will use renderSvg() + its own PNG encoder instead.
- *
- * @param {object} data - Normalized WeatherData.
- * @returns {Promise<Uint8Array>} RGBA PNG bytes.
- */
-export async function renderWeather(data) {
-  const fonts = await loadFonts();
-
-  const svg = await satori(<WeatherFrame data={data} />, {
-    width: WIDTH,
-    height: HEIGHT,
-    fonts,
-  });
-
-  const resvg = new Resvg(svg, {
-    background: 'white',
-    fitTo: { mode: 'width', value: WIDTH },
-  });
-
-  return resvg.render().asPng();
-}

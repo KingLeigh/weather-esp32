@@ -337,8 +337,6 @@ function computeAxisLabels(nowHour, nowMinute, chartW) {
   return out;
 }
 
-const PRECIP_CHART_TITLE = '24H PRECIP';
-
 // Threshold: show precip chart if any hour has >= this % chance.
 const PRECIP_THRESHOLD = 5;
 
@@ -581,7 +579,7 @@ function TempChart({ data }) {
 
 // ─── precipitation chart ────────────────────────────────────────────────────
 
-function PrecipChart({ data }) {
+function PrecipChart({ data, hasRain, hasSnow }) {
   const { rain_chance, snow_chance, updated } = data;
   const chartW = CONTENT_W;
   const chartH = 164;
@@ -600,9 +598,6 @@ function PrecipChart({ data }) {
     const barH = (pct / 100) * usableH;
     return { x: i * barW, y: padTop + usableH - barH, w: barW, h: barH };
   });
-
-  const hasRain = rain_chance.some((p) => p >= 5);
-  const hasSnow = snow_chance.some((p) => p >= 5);
 
   // Chart title: adapt to what's showing.
   const label = hasSnow && hasRain ? '24H PRECIP %'
@@ -780,11 +775,13 @@ export function WeatherFrame({ data }) {
       }}
     >
       <Hero data={data} />
-      {data.rain_chance.some((p) => p >= PRECIP_THRESHOLD) ||
-       data.snow_chance.some((p) => p >= PRECIP_THRESHOLD)
-        ? <PrecipChart data={data} />
-        : <TempChart data={data} />
-      }
+      {(() => {
+        const hasRain = data.rain_chance.some((p) => p >= PRECIP_THRESHOLD);
+        const hasSnow = data.snow_chance.some((p) => p >= PRECIP_THRESHOLD);
+        return (hasRain || hasSnow)
+          ? <PrecipChart data={data} hasRain={hasRain} hasSnow={hasSnow} />
+          : <TempChart data={data} />;
+      })()}
       <Footer data={data} />
     </div>
   );
