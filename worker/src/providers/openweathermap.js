@@ -41,20 +41,22 @@ export class OpenWeatherMapProvider extends WeatherProvider {
     const rain_chance = [];
     const snow_chance = [];
     const hourly_temp = [];
+    let totalRainMm = 0;
+    let totalSnowMm = 0;
 
     for (let i = 0; i < 24 && i < hourly.length; i++) {
       const h = hourly[i];
       const pop = Math.round((h.pop || 0) * 100);
-      const hasRain = (h.rain?.['1h'] || 0) > 0;
-      const hasSnow = (h.snow?.['1h'] || 0) > 0;
+      const rainVol = h.rain?.['1h'] || 0;
+      const snowVol = h.snow?.['1h'] || 0;
 
-      if (hasSnow && !hasRain) {
+      if (snowVol > 0 && rainVol === 0) {
         rain_chance.push(0);
         snow_chance.push(pop);
-      } else if (hasRain && !hasSnow) {
+      } else if (rainVol > 0 && snowVol === 0) {
         rain_chance.push(pop);
         snow_chance.push(0);
-      } else if (hasRain && hasSnow) {
+      } else if (rainVol > 0 && snowVol > 0) {
         // Both present — show both at full probability.
         rain_chance.push(pop);
         snow_chance.push(pop);
@@ -64,6 +66,8 @@ export class OpenWeatherMapProvider extends WeatherProvider {
         snow_chance.push(0);
       }
 
+      totalRainMm += rainVol;
+      totalSnowMm += snowVol;
       hourly_temp.push(Math.round(h.temp));
     }
 
@@ -99,8 +103,8 @@ export class OpenWeatherMapProvider extends WeatherProvider {
       rain_chance,
       snow_chance,
       hourly_temp,
-      rain_in: Math.round((daily.rain || 0) / 25.4 * 100) / 100,  // mm → inches
-      snow_in: Math.round((daily.snow || 0) / 25.4 * 100) / 100,
+      rain_in: Math.round(totalRainMm / 25.4 * 100) / 100,  // next-24h total, mm → inches
+      snow_in: Math.round(totalSnowMm / 25.4 * 100) / 100,
       uv: {
         current: uvCurrent,
         high: uvHigh
