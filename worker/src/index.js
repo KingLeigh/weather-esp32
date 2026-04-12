@@ -129,12 +129,13 @@ async function fetchWeatherData(env) {
   const providerName = env.WEATHER_PROVIDER || 'openweathermap';
   const apiKey = env.WEATHER_API_KEY;
   const location = env.WEATHER_LOCATION || 'Manhattan';
+  const timezone = env.TIMEZONE || 'America/New_York';
 
   if (!apiKey) {
     throw new Error('WEATHER_API_KEY environment variable not set');
   }
 
-  const provider = createProvider(providerName, apiKey, location);
+  const provider = createProvider(providerName, apiKey, location, timezone);
   return await provider.fetch();
 }
 

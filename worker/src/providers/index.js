@@ -16,19 +16,20 @@ const PROVIDERS = {
 
 /**
  * Create a weather provider instance
- * @param {string} providerName - Name of the provider (e.g., 'weatherapi')
+ * @param {string} providerName - Name of the provider (e.g., 'openweathermap')
  * @param {string} apiKey - API key for the provider
  * @param {string} location - Location to fetch weather for
+ * @param {string} timezone - IANA timezone (e.g., 'America/New_York')
  * @returns {WeatherProvider} Provider instance
  */
-export function createProvider(providerName, apiKey, location) {
+export function createProvider(providerName, apiKey, location, timezone) {
   const ProviderClass = PROVIDERS[providerName];
 
   if (!ProviderClass) {
     throw new Error(`Unknown weather provider: ${providerName}. Available: ${Object.keys(PROVIDERS).join(', ')}`);
   }
 
-  return new ProviderClass(apiKey, location);
+  return new ProviderClass(apiKey, location, timezone);
 }
 
 /**

@@ -135,6 +135,10 @@ static bool connectWiFi() {
     // time() returns a stale value from the last boot and the staleness
     // calculation drifts further behind on each deep sleep cycle.
     configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+    // TODO: This timezone must match the Worker's TIMEZONE var in wrangler.toml.
+    // If the Worker is reconfigured for a different timezone, update this POSIX
+    // TZ string to match, otherwise the staleness calculation will be wrong.
+    // See: https://www.gnu.org/software/libc/manual/html_node/TZ-Variable.html
     setenv("TZ", "EST5EDT,M3.2.0,M11.1.0", 1);
     tzset();
 
