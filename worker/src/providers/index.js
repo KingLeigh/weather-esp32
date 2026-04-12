@@ -1,12 +1,16 @@
-import { WeatherAPIProvider } from './weatherapi.js';
 import { OpenWeatherMapProvider } from './openweathermap.js';
 
 /**
  * Weather provider factory
- * Add new providers here to make them available
+ *
+ * To add a new provider:
+ *   1. Create src/providers/yourprovider.js extending WeatherProvider (base.js)
+ *   2. Implement fetchRaw() and transform() — output must include rain_chance[],
+ *      snow_chance[], and all other fields documented in the Worker README
+ *   3. Register it in the PROVIDERS map below
+ *   4. Set WEATHER_PROVIDER = "yourprovider" in wrangler.toml
  */
 const PROVIDERS = {
-  'weatherapi': WeatherAPIProvider,
   'openweathermap': OpenWeatherMapProvider,
 };
 
