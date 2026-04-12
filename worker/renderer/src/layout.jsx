@@ -288,7 +288,8 @@ function Hero({ data }) {
           style={{
             display: 'flex',
             flexDirection: 'row',
-            fontSize: 34,
+            fontSize: 40,
+            fontWeight: 700,
             color: FG_MUTED,
             marginTop: 14,
           }}
@@ -326,9 +327,8 @@ function computeAxisLabels(nowHour, nowMinute, chartW) {
 
   const labelForHour = (h) => {
     const hh = ((h % 24) + 24) % 24;
-    if (hh === 0) return '12a';
-    if (hh === 12) return '12p';
-    return hh < 12 ? `${hh}a` : `${hh - 12}p`;
+    if (hh === 0 || hh === 12) return '12';
+    return hh < 12 ? String(hh) : String(hh - 12);
   };
 
   const out = [];
@@ -341,43 +341,73 @@ function computeAxisLabels(nowHour, nowMinute, chartW) {
   return out;
 }
 
-// Chart title lookup — keyed by `precip_type` from the provider.
-const CHART_TITLES = {
-  snow: '24-HOUR SNOW %',
-  mixed: '24-HOUR PRECIPITATION %',
-};
-const DEFAULT_CHART_TITLE = '24-HOUR RAIN %';
+const CHART_TITLE = '24-HOUR PRECIPITATION %';
 
 // Width of each hour-axis label tile, centered on its tick.
 const AXIS_LABEL_W = 50;
 
 function PrecipChart({ data }) {
-  const { precipitation, precip_type: precipType, updated } = data;
+  const { rain_chance, snow_chance, updated } = data;
   const chartW = CONTENT_W;
-  const chartH = 150;
-  const n = precipitation.length;
-  const strokeW = 3;
-  // Inset the drawable area so the line stroke doesn't clip against the top
-  // edge or the bottom baseline. padBottom is smaller than padTop because the
-  // line almost never touches 0% — leaving a few pixels of headroom above the
-  // baseline looks cleaner than symmetric insets.
-  const padTop = strokeW;
+  const chartH = 164;
+  const n = rain_chance.length;
+  const padTop = 2;
   const padBottom = 2;
   const usableH = chartH - padTop - padBottom;
 
-  // Map each hourly probability (0..100) to an (x, y) point across the width.
-  const points = precipitation.map((pct, i) => {
-    const x = n === 1 ? 0 : (i / (n - 1)) * chartW;
-    const y = padTop + usableH - (pct / 100) * usableH;
-    return [x, y];
+  // Build touching bars for rain (light grey) and snow (dark grey).
+  const barW = chartW / n;
+  const rainBars = rain_chance.map((pct, i) => {
+    const barH = (pct / 100) * usableH;
+    return { x: i * barW, y: padTop + usableH - barH, w: barW, h: barH };
+  });
+  const snowBars = snow_chance.map((pct, i) => {
+    const barH = (pct / 100) * usableH;
+    return { x: i * barW, y: padTop + usableH - barH, w: barW, h: barH };
   });
 
-  const lineStr = points.map(([x, y]) => `${x},${y}`).join(' ');
-  // Close the polygon down to the baseline so resvg fills the area beneath
-  // the line with the area color.
-  const areaStr = `${lineStr} ${chartW},${chartH} 0,${chartH}`;
+  const hasRain = rain_chance.some((p) => p >= 5);
+  const hasSnow = snow_chance.some((p) => p >= 5);
 
-  const label = CHART_TITLES[precipType] ?? DEFAULT_CHART_TITLE;
+  // Chart title: adapt to what's showing.
+  const label = hasSnow && !hasRain ? '24-HOUR SNOW %'
+    : hasSnow && hasRain ? '24-HOUR RAIN + SNOW %'
+    : CHART_TITLE;
+
+  // Right-aligned summary.
+  let summary = '';
+  if (!hasRain && !hasSnow) {
+    summary = 'No precipitation for 24 hrs';
+  } else {
+    const parts = [];
+    if (hasRain) {
+      const firstIdx = rain_chance.findIndex((p) => p >= 5);
+      if (firstIdx === 0) {
+        parts.push(`Rain now`);
+      } else {
+        const { hour: nowH } = parseLocalHourMinute(updated);
+        const startHour = (nowH + firstIdx) % 24;
+        const h12 = startHour === 0 ? 12 : startHour > 12 ? startHour - 12 : startHour;
+        const ap = startHour < 12 ? 'am' : 'pm';
+        parts.push(`Rain at ${h12}${ap}`);
+      }
+      if (data.rain_mm > 0) parts.push(`${String(data.rain_mm)}"`);
+    }
+    if (hasSnow) {
+      const firstIdx = snow_chance.findIndex((p) => p >= 5);
+      if (firstIdx === 0) {
+        parts.push(`Snow now`);
+      } else {
+        const { hour: nowH } = parseLocalHourMinute(updated);
+        const startHour = (nowH + firstIdx) % 24;
+        const h12 = startHour === 0 ? 12 : startHour > 12 ? startHour - 12 : startHour;
+        const ap = startHour < 12 ? 'am' : 'pm';
+        parts.push(`Snow at ${h12}${ap}`);
+      }
+      if (data.snow_mm > 0) parts.push(`${String(data.snow_mm)}"`);
+    }
+    summary = parts.join(' · ');
+  }
 
   const { hour: nowHour, minute: nowMinute } = parseLocalHourMinute(updated);
   const axisLabels = computeAxisLabels(nowHour, nowMinute, chartW);
@@ -394,19 +424,24 @@ function PrecipChart({ data }) {
         style={{
           display: 'flex',
           flexDirection: 'row',
-          fontSize: 18,
+          fontSize: 24,
           fontWeight: 600,
           color: FG_MUTED,
-          letterSpacing: 2,
+          letterSpacing: 1.5,
           marginBottom: 8,
         }}
       >
         <div>{label}</div>
+        {summary && (
+          <div style={{ marginLeft: 'auto', letterSpacing: 0 }}>
+            {summary}
+          </div>
+        )}
       </div>
 
-      {/* Chart area: filled-area time series. Satori passes inline SVG
-          through to resvg, so we draw the polygon (area fill) first and the
-          polyline (top edge) over it. */}
+      {/* Chart area: touching bars, one per hour. Rain is light grey,
+          snow is darker grey drawn on top. crispEdges avoids AA noise on
+          the flat fills (see e-paper rendering lessons in project memory). */}
       <div
         style={{
           display: 'flex',
@@ -416,18 +451,34 @@ function PrecipChart({ data }) {
         }}
       >
         <svg width={chartW} height={chartH}>
-          {/* crispEdges disables anti-aliasing on the fill so every interior
-              pixel is exactly #ccc. Without this, resvg's edge-AA produces
-              intermediate luma values that quantize unevenly to 4bpp on the
-              e-paper panel and look grainy. The smooth black polyline on top
-              visually hides the jagged edge of the fill. */}
-          <polygon points={areaStr} fill="#ccc" shapeRendering="crispEdges" />
-          <polyline
-            points={lineStr}
-            stroke={FG}
-            strokeWidth={strokeW}
-            fill="none"
-          />
+          {/* Rain bars (light grey, behind) */}
+          {rainBars.map((bar, i) => (
+            bar.h > 0 && (
+              <rect
+                key={`r${i}`}
+                x={bar.x}
+                y={bar.y}
+                width={bar.w}
+                height={bar.h}
+                fill="#ccc"
+                shapeRendering="crispEdges"
+              />
+            )
+          ))}
+          {/* Snow bars (dark grey, on top) */}
+          {snowBars.map((bar, i) => (
+            bar.h > 0 && (
+              <rect
+                key={`s${i}`}
+                x={bar.x}
+                y={bar.y}
+                width={bar.w}
+                height={bar.h}
+                fill="#666"
+                shapeRendering="crispEdges"
+              />
+            )
+          ))}
         </svg>
       </div>
 
@@ -449,7 +500,7 @@ function PrecipChart({ data }) {
               position: 'absolute',
               left: x - AXIS_LABEL_W / 2,
               width: AXIS_LABEL_W,
-              fontSize: 17,
+              fontSize: 24,
               fontWeight: 600,
               color: FG_MUTED,
               display: 'flex',
@@ -471,24 +522,15 @@ function Footer({ data }) {
         display: 'flex',
         flexDirection: 'row',
         alignItems: 'flex-start',
-        padding: `14px ${PAGE_PADDING_X}px 24px ${PAGE_PADDING_X}px`,
+        padding: `6px ${PAGE_PADDING_X}px 12px ${PAGE_PADDING_X}px`,
       }}
     >
-      {/* Sun times */}
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: 'row',
-          fontSize: 26,
-          color: FG,
-        }}
-      >
-        <div>{`↑ ${data.sun.sunrise}`}</div>
-        <div style={{ marginLeft: 24 }}>{`↓ ${data.sun.sunset}`}</div>
-      </div>
-
       {/* TODO: moon phase will go somewhere later — Erik Flowers has
           wi_moon_* glyphs we can use. Layout position TBD. */}
+
+      {/* TODO: sunrise/sunset — removed to free up space. Add back when
+          layout has room, possibly as small text in the footer or as
+          part of a sun/moon row. */}
 
       {/*
        * ⚠️ RESERVED REGION — DO NOT DRAW HERE ⚠️

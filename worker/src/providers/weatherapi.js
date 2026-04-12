@@ -31,37 +31,16 @@ export class WeatherAPIProvider extends WeatherProvider {
     const now = new Date();
     const currentHour = now.getHours();
 
-    // Extract 24 hours of precipitation data starting from current hour
-    // Use max of rain or snow chance to capture all precipitation types
-    const precipitation = [];
-    let totalRain = 0;
-    let totalSnow = 0;
+    // Extract 24 hours of rain and snow probability separately.
+    // WeatherAPI provides chance_of_rain and chance_of_snow per hour.
+    const rain_chance = [];
+    const snow_chance = [];
 
     for (let i = 0; i < 24; i++) {
       const hourIndex = (currentHour + i) % 24;
       const hourData = hourly[hourIndex];
-      const rainChance = hourData.chance_of_rain || 0;
-      const snowChance = hourData.chance_of_snow || 0;
-      const precipChance = Math.max(rainChance, snowChance);
-      precipitation.push(precipChance);
-
-      // Track which type is more prevalent
-      totalRain += rainChance;
-      totalSnow += snowChance;
-    }
-
-    // Determine precipitation type for labeling
-    let precipType = 'rain';  // default
-    if (totalSnow > 0 && totalRain > 0) {
-      // Both present - check if mixed (>20% of each type)
-      const rainRatio = totalRain / (totalRain + totalSnow);
-      if (rainRatio > 0.2 && rainRatio < 0.8) {
-        precipType = 'mixed';
-      } else if (totalSnow > totalRain) {
-        precipType = 'snow';
-      }
-    } else if (totalSnow > totalRain) {
-      precipType = 'snow';
+      rain_chance.push(hourData.chance_of_rain || 0);
+      snow_chance.push(hourData.chance_of_snow || 0);
     }
 
     // Map weather condition to our icon types
@@ -86,8 +65,8 @@ export class WeatherAPIProvider extends WeatherProvider {
         low: low
       },
       weather: weatherIcon,
-      precipitation: precipitation,
-      precip_type: precipType,  // "rain", "snow", or "mixed"
+      rain_chance,
+      snow_chance,
       rain_mm: Math.round((today.day.totalprecip_mm || 0) * 10) / 10,
       snow_mm: Math.round((today.day.totalsnow_cm || 0) * 10) / 10,  // WeatherAPI reports snow in cm
       uv: {

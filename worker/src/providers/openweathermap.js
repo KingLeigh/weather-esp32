@@ -33,32 +33,35 @@ export class OpenWeatherMapProvider extends WeatherProvider {
     const hourly = data.hourly;  // 48 hours
     const daily = data.daily[0]; // Today
 
-    // Extract 24 hours of precipitation probability (0-100)
-    const precipitation = [];
-    let totalRain = 0;
-    let totalSnow = 0;
+    // Extract 24 hours of rain and snow probability separately.
+    // OWM gives a single `pop` (0-1) for overall precipitation probability.
+    // We attribute it to rain or snow based on which volume is present for
+    // that hour. If both are present, both get the full pop value (the chart
+    // will overlay snow on top of rain).
+    const rain_chance = [];
+    const snow_chance = [];
 
     for (let i = 0; i < 24 && i < hourly.length; i++) {
       const h = hourly[i];
-      // OWM pop is 0-1, convert to 0-100
-      precipitation.push(Math.round((h.pop || 0) * 100));
+      const pop = Math.round((h.pop || 0) * 100);
+      const hasRain = (h.rain?.['1h'] || 0) > 0;
+      const hasSnow = (h.snow?.['1h'] || 0) > 0;
 
-      // Track rain vs snow volume to determine type
-      totalRain += (h.rain?.['1h'] || 0);
-      totalSnow += (h.snow?.['1h'] || 0);
-    }
-
-    // Determine precipitation type
-    let precipType = 'rain';
-    if (totalSnow > 0 && totalRain > 0) {
-      const rainRatio = totalRain / (totalRain + totalSnow);
-      if (rainRatio > 0.2 && rainRatio < 0.8) {
-        precipType = 'mixed';
-      } else if (totalSnow > totalRain) {
-        precipType = 'snow';
+      if (hasSnow && !hasRain) {
+        rain_chance.push(0);
+        snow_chance.push(pop);
+      } else if (hasRain && !hasSnow) {
+        rain_chance.push(pop);
+        snow_chance.push(0);
+      } else if (hasRain && hasSnow) {
+        // Both present — show both at full probability.
+        rain_chance.push(pop);
+        snow_chance.push(pop);
+      } else {
+        // No volume data but pop > 0 — default to rain.
+        rain_chance.push(pop);
+        snow_chance.push(0);
       }
-    } else if (totalSnow > totalRain) {
-      precipType = 'snow';
     }
 
     // Map weather condition to our icon types
@@ -90,8 +93,8 @@ export class OpenWeatherMapProvider extends WeatherProvider {
         low: low
       },
       weather: weatherIcon,
-      precipitation: precipitation,
-      precip_type: precipType,
+      rain_chance,
+      snow_chance,
       rain_mm: Math.round((daily.rain || 0) * 10) / 10,   // daily total in mm
       snow_mm: Math.round((daily.snow || 0) * 10) / 10,   // daily total in mm
       uv: {
