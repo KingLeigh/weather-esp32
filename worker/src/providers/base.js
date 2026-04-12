@@ -29,7 +29,7 @@ export class WeatherProvider {
    *   rain_chance: number[24] (0-100 per hour),
    *   snow_chance: number[24] (0-100 per hour),
    *   hourly_temp: number[24] (°F per hour),
-   *   rain_mm: number, snow_mm: number,
+   *   rain_in: number, snow_in: number,
    *   uv: { current, high },
    *   sun: { sunrise, sunset },
    *   moon: { illumination, phase },

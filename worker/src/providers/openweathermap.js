@@ -99,8 +99,8 @@ export class OpenWeatherMapProvider extends WeatherProvider {
       rain_chance,
       snow_chance,
       hourly_temp,
-      rain_mm: Math.round((daily.rain || 0) * 10) / 10,   // daily total in mm
-      snow_mm: Math.round((daily.snow || 0) * 10) / 10,   // daily total in mm
+      rain_in: Math.round((daily.rain || 0) / 25.4 * 100) / 100,  // mm → inches
+      snow_in: Math.round((daily.snow || 0) / 25.4 * 100) / 100,
       uv: {
         current: uvCurrent,
         high: uvHigh

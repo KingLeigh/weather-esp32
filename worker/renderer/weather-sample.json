@@ -57,8 +57,6 @@
     0,
     0
   ],
-  "rain_mm": 0.8,
-  "snow_mm": 0,
   "uv": {
     "current": 6,
     "high": 9
@@ -76,5 +74,7 @@
     "dir": "NW"
   },
   "is_day": true,
-  "updated": "2026-04-11T14:30:00"
+  "updated": "2026-04-11T14:30:00",
+  "rain_in": 0.03,
+  "snow_in": 0.0
 }

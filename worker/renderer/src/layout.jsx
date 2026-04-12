@@ -621,7 +621,7 @@ function PrecipChart({ data, hasRain, hasSnow }) {
         const ap = startHour < 12 ? 'am' : 'pm';
         parts.push(`Rain at ${h12}${ap}`);
       }
-      if (data.rain_mm > 0) parts.push(`${String(data.rain_mm)}"`);
+      if (data.rain_in > 0) parts.push(`${String(data.rain_in)}"`);
     }
     if (hasSnow) {
       const firstIdx = snow_chance.findIndex((p) => p >= 5);
@@ -634,7 +634,7 @@ function PrecipChart({ data, hasRain, hasSnow }) {
         const ap = startHour < 12 ? 'am' : 'pm';
         parts.push(`Snow at ${h12}${ap}`);
       }
-      if (data.snow_mm > 0) parts.push(`${String(data.snow_mm)}"`);
+      if (data.snow_in > 0) parts.push(`${String(data.snow_in)}"`);
     }
     summary = parts.join(' · ');
   }
