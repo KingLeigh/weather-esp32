@@ -27,7 +27,7 @@ import React from 'react';
 const WIDTH = 960;
 const HEIGHT = 540;
 
-// Every major section (Hero, PrecipChart, Footer) is padded by this amount on
+// Every major section (Hero, ForecastChart, Footer) is padded by this amount on
 // the left and right so their content aligns vertically down the page. The
 // chart's drawable width is derived from this rather than hardcoded so it
 // stays flush with the rest of the layout if padding ever changes.
@@ -404,9 +404,9 @@ function chartGridlines(chartW, chartH, updated, yTop, yBottom) {
   ));
 }
 
-// ─── temperature chart ──────────────────────────────────────────────────────
+// ─── forecast chart (temperature line + optional precip bars) ───────────────
 
-function TempChart({ data, hasRain, hasSnow }) {
+function ForecastChart({ data, hasRain, hasSnow }) {
   const { hourly_temp, rain_chance, snow_chance, updated } = data;
   const chartW = CONTENT_W;
   const chartH = 164;
@@ -479,7 +479,7 @@ function TempChart({ data, hasRain, hasSnow }) {
 
   // ── Title + summary ───────────────────────────────────────────────
   const hasPrecip = hasRain || hasSnow;
-  const leftLabel = hasPrecip ? '24H TEMP + PRECIP' : '24H TEMP';
+  const leftLabel = '24H FORECAST';
 
   const formatHour = (hourOffset) => {
     const nowH = parseLocalHour(updated);
@@ -643,168 +643,6 @@ function TempChart({ data, hasRain, hasSnow }) {
   );
 }
 
-// ─── precipitation chart ────────────────────────────────────────────────────
-
-function PrecipChart({ data, hasRain, hasSnow }) {
-  const { rain_chance, snow_chance, updated } = data;
-  const chartW = CONTENT_W;
-  const chartH = 164;
-  const n = rain_chance.length;
-  const padTop = 2;
-  const padBottom = 2;
-  const usableH = chartH - padTop - padBottom;
-
-  // Build touching bars for rain (light grey) and snow (dark grey).
-  const barW = chartW / n;
-  const rainBars = rain_chance.map((pct, i) => {
-    const barH = (pct / 100) * usableH;
-    return { x: i * barW, y: padTop + usableH - barH, w: barW, h: barH };
-  });
-  const snowBars = snow_chance.map((pct, i) => {
-    const barH = (pct / 100) * usableH;
-    return { x: i * barW, y: padTop + usableH - barH, w: barW, h: barH };
-  });
-
-  // Chart title: adapt to what's showing.
-  const label = hasSnow && hasRain ? '24H PRECIP %'
-    : hasSnow ? '24H SNOW %'
-    : '24H RAIN %';
-
-  // Right-aligned summary describing the precipitation outlook.
-  //
-  // Logic per type (rain / snow):
-  //   - Currently active → "Rain until Xpm" (find first hour that drops below
-  //     threshold). If it never drops, just "Rain now".
-  //   - Not active yet → "Rain from Xpm" (first hour above threshold).
-  // Amounts appended as "· X.XX" total" when > 0.
-
-  const formatHour = (hourOffset) => {
-    const nowH = parseLocalHour(updated);
-    const h24 = (nowH + hourOffset) % 24;
-    const h12 = h24 === 0 ? 12 : h24 > 12 ? h24 - 12 : h24;
-    const ap = h24 < 12 ? 'am' : 'pm';
-    return `${h12}${ap}`;
-  };
-
-  const describePrecip = (chances, label) => {
-    const isNow = chances[0] >= PRECIP_THRESHOLD;
-    if (isNow) {
-      // Find when it stops (first hour below threshold).
-      const stopIdx = chances.findIndex((p) => p < PRECIP_THRESHOLD);
-      if (stopIdx === -1) return `${label} now`;
-      return `${label} until ${formatHour(stopIdx)}`;
-    }
-    // Find when it starts.
-    const startIdx = chances.findIndex((p) => p >= PRECIP_THRESHOLD);
-    return `${label} from ${formatHour(startIdx)}`;
-  };
-
-  let summary = '';
-  if (!hasRain && !hasSnow) {
-    summary = 'No precipitation for 24 hrs';
-  } else if (hasRain && hasSnow) {
-    // Both present — keep it short, the chart shows timing visually.
-    const totalIn = (data.rain_in || 0) + (data.snow_in || 0);
-    summary = totalIn > 0 ? `Rain + Snow · ${String(totalIn)}" total` : 'Rain + Snow';
-  } else {
-    // Single type — room for full timing description.
-    const desc = hasRain
-      ? describePrecip(rain_chance, 'Rain')
-      : describePrecip(snow_chance, 'Snow');
-    const amount = hasRain ? data.rain_in : data.snow_in;
-    summary = amount > 0 ? `${desc} · ${String(amount)}" total` : desc;
-  }
-
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        padding: `10px ${PAGE_PADDING_X}px 0 ${PAGE_PADDING_X}px`,
-      }}
-    >
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: 'row',
-          alignItems: 'baseline',
-          color: FG_MUTED,
-          marginBottom: 18,
-        }}
-      >
-        <div style={{ fontSize: 24, fontWeight: 600, letterSpacing: 1.5 }}>{label}</div>
-        {summary && (
-          <div style={{ marginLeft: 'auto', letterSpacing: 0, fontSize: 42, fontWeight: 700 }}>
-            {summary}
-          </div>
-        )}
-      </div>
-
-      {/* Chart area: touching bars, one per hour. Rain is light grey,
-          snow is darker grey drawn on top. crispEdges avoids AA noise on
-          the flat fills (see e-paper rendering lessons in project memory). */}
-      <div
-        style={{
-          display: 'flex',
-          width: chartW,
-          height: chartH,
-          borderBottom: `2px solid ${BORDER}`,
-        }}
-      >
-        <svg width={chartW} height={chartH}>
-          {chartGridlines(chartW, chartH, updated, padTop, padTop + usableH)}
-          {/* Horizontal reference lines at 25%, 50%, 75%, 100% */}
-          {[25, 50, 75, 100].map((pct) => {
-            const y = padTop + usableH - (pct / 100) * usableH;
-            return (
-              <line
-                key={`h${pct}`}
-                x1={0}
-                y1={y}
-                x2={chartW}
-                y2={y}
-                stroke={GRIDLINE_MINOR}
-                strokeWidth={1}
-                shapeRendering="crispEdges"
-              />
-            );
-          })}
-          {/* Rain bars (light grey, behind) */}
-          {rainBars.map((bar, i) => (
-            bar.h > 0 && (
-              <rect
-                key={`r${i}`}
-                x={bar.x}
-                y={bar.y}
-                width={bar.w}
-                height={bar.h}
-                fill="#ccc"
-                shapeRendering="crispEdges"
-              />
-            )
-          ))}
-          {/* Snow bars (dark grey, on top) */}
-          {snowBars.map((bar, i) => (
-            bar.h > 0 && (
-              <rect
-                key={`s${i}`}
-                x={bar.x}
-                y={bar.y}
-                width={bar.w}
-                height={bar.h}
-                fill="#666"
-                shapeRendering="crispEdges"
-              />
-            )
-          ))}
-        </svg>
-      </div>
-
-      <AxisLabels chartW={chartW} updated={updated} />
-    </div>
-  );
-}
-
 function Footer({ data }) {
   return (
     <div
@@ -851,7 +689,7 @@ export function WeatherFrame({ data }) {
       }}
     >
       <Hero data={data} />
-      <TempChart
+      <ForecastChart
         data={data}
         hasRain={data.rain_chance.some((p) => p >= PRECIP_THRESHOLD)}
         hasSnow={data.snow_chance.some((p) => p >= PRECIP_THRESHOLD)}
