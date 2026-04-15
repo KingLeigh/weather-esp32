@@ -406,17 +406,14 @@ function chartGridlines(chartW, chartH, updated, yTop, yBottom) {
 
 // ─── temperature chart ──────────────────────────────────────────────────────
 
-function TempChart({ data }) {
-  const { hourly_temp, updated } = data;
+function TempChart({ data, hasRain, hasSnow }) {
+  const { hourly_temp, rain_chance, snow_chance, updated } = data;
   const chartW = CONTENT_W;
   const chartH = 164;
   const n = hourly_temp.length;
   const strokeW = 3;
 
-  // Auto-scale: round outward to the nearest step so gridlines land on
-  // round numbers. Use 5° steps for narrow ranges, 10° for wider ones.
-  // The rounded scale provides natural breathing room above and below
-  // the data since scaleMin < minTemp and scaleMax > maxTemp.
+  // ── Temperature y-axis: auto-scaled to rounded steps ──────────────
   const minTemp = Math.min(...hourly_temp);
   const maxTemp = Math.max(...hourly_temp);
   const rawRange = maxTemp - minTemp;
@@ -425,7 +422,6 @@ function TempChart({ data }) {
   const scaleMax = Math.ceil(maxTemp / step) * step;
   const range = scaleMax - scaleMin || 1;
 
-  // Small inset so gridlines at 0% and 100% aren't clipped at SVG edges.
   const inset = 2;
   const usableH = chartH - 2 * inset;
 
@@ -439,8 +435,18 @@ function TempChart({ data }) {
 
   const lineStr = points.map(([x, y]) => `${x},${y}`).join(' ');
 
-  // Find the center of the longest continuous run for high and low temps,
-  // so the label sits in the middle of a plateau rather than at its left edge.
+  // ── Precipitation bars (rendered underneath temp line) ─────────────
+  const barW = chartW / n;
+  const rainBars = hasRain ? rain_chance.map((pct, i) => {
+    const barH = (pct / 100) * usableH;
+    return { x: i * barW, y: inset + usableH - barH, w: barW, h: barH };
+  }) : [];
+  const snowBars = hasSnow ? snow_chance.map((pct, i) => {
+    const barH = (pct / 100) * usableH;
+    return { x: i * barW, y: inset + usableH - barH, w: barW, h: barH };
+  }) : [];
+
+  // ── High/low label positioning ────────────────────────────────────
   const findRunCenter = (arr, value) => {
     let bestStart = 0, bestLen = 0;
     let start = -1, len = 0;
@@ -459,12 +465,10 @@ function TempChart({ data }) {
   const highCenter = findRunCenter(hourly_temp, maxTemp);
   const lowCenter = findRunCenter(hourly_temp, minTemp);
 
-  // Interpolate x position for fractional indices.
   const xForIdx = (idx) => {
     if (n === 1) return 0;
     return (idx / (n - 1)) * chartW;
   };
-  // Interpolate y position for fractional indices.
   const yForIdx = (idx) => {
     const floor = Math.floor(idx);
     const ceil = Math.min(floor + 1, n - 1);
@@ -472,6 +476,43 @@ function TempChart({ data }) {
     const t = hourly_temp[floor] * (1 - frac) + hourly_temp[ceil] * frac;
     return yForTemp(t);
   };
+
+  // ── Title + summary ───────────────────────────────────────────────
+  const hasPrecip = hasRain || hasSnow;
+  const leftLabel = hasPrecip ? '24H TEMP + PRECIP' : '24H TEMP';
+
+  const formatHour = (hourOffset) => {
+    const nowH = parseLocalHour(updated);
+    const h24 = (nowH + hourOffset) % 24;
+    const h12 = h24 === 0 ? 12 : h24 > 12 ? h24 - 12 : h24;
+    const ap = h24 < 12 ? 'am' : 'pm';
+    return `${h12}${ap}`;
+  };
+
+  const describePrecip = (chances, label) => {
+    const isNow = chances[0] >= PRECIP_THRESHOLD;
+    if (isNow) {
+      const stopIdx = chances.findIndex((p) => p < PRECIP_THRESHOLD);
+      if (stopIdx === -1) return `${label} now`;
+      return `${label} until ${formatHour(stopIdx)}`;
+    }
+    const startIdx = chances.findIndex((p) => p >= PRECIP_THRESHOLD);
+    return `${label} from ${formatHour(startIdx)}`;
+  };
+
+  let rightSummary = '';
+  if (!hasPrecip) {
+    rightSummary = 'No umbrella needed!';
+  } else if (hasRain && hasSnow) {
+    const totalIn = (data.rain_in || 0) + (data.snow_in || 0);
+    rightSummary = totalIn > 0 ? `Rain + Snow · ${String(totalIn)}" total` : 'Rain + Snow';
+  } else {
+    const desc = hasRain
+      ? describePrecip(rain_chance, 'Rain')
+      : describePrecip(snow_chance, 'Snow');
+    const amount = hasRain ? data.rain_in : data.snow_in;
+    rightSummary = amount > 0 ? `${desc} · ${String(amount)}" total` : desc;
+  }
 
   return (
     <div
@@ -490,9 +531,9 @@ function TempChart({ data }) {
           marginBottom: 18,
         }}
       >
-        <div style={{ fontSize: 24, fontWeight: 600, letterSpacing: 1.5 }}>{'24H TEMP'}</div>
+        <div style={{ fontSize: 24, fontWeight: 600, letterSpacing: 1.5 }}>{leftLabel}</div>
         <div style={{ marginLeft: 'auto', letterSpacing: 0, fontSize: 42, fontWeight: 700 }}>
-          {'No umbrella needed!'}
+          {rightSummary}
         </div>
       </div>
 
@@ -507,7 +548,7 @@ function TempChart({ data }) {
       >
         <svg width={chartW} height={chartH} style={{ position: 'absolute', left: 0, top: 0 }}>
           {chartGridlines(chartW, chartH, updated, inset, inset + usableH)}
-          {/* Horizontal reference lines at each step increment */}
+          {/* Horizontal reference lines at each temp step */}
           {(() => {
             const lines = [];
             for (let t = scaleMin; t <= scaleMax; t += step) {
@@ -527,6 +568,35 @@ function TempChart({ data }) {
             }
             return lines;
           })()}
+          {/* Rain bars (light grey, behind temp line) */}
+          {rainBars.map((bar, i) => (
+            bar.h > 0 && (
+              <rect
+                key={`r${i}`}
+                x={bar.x}
+                y={bar.y}
+                width={bar.w}
+                height={bar.h}
+                fill="#ccc"
+                shapeRendering="crispEdges"
+              />
+            )
+          ))}
+          {/* Snow bars (dark grey, behind temp line) */}
+          {snowBars.map((bar, i) => (
+            bar.h > 0 && (
+              <rect
+                key={`s${i}`}
+                x={bar.x}
+                y={bar.y}
+                width={bar.w}
+                height={bar.h}
+                fill="#666"
+                shapeRendering="crispEdges"
+              />
+            )
+          ))}
+          {/* Temperature line (on top of everything) */}
           <polyline
             points={lineStr}
             stroke={FG}
@@ -534,7 +604,7 @@ function TempChart({ data }) {
             fill="none"
           />
         </svg>
-        {/* High temp label — below the peak (more space there) */}
+        {/* High temp label — below the peak */}
         <div
           style={{
             position: 'absolute',
@@ -550,7 +620,7 @@ function TempChart({ data }) {
         >
           {`${maxTemp}°`}
         </div>
-        {/* Low temp label — above the trough (more space there) */}
+        {/* Low temp label — above the trough */}
         <div
           style={{
             position: 'absolute',
@@ -781,13 +851,11 @@ export function WeatherFrame({ data }) {
       }}
     >
       <Hero data={data} />
-      {(() => {
-        const hasRain = data.rain_chance.some((p) => p >= PRECIP_THRESHOLD);
-        const hasSnow = data.snow_chance.some((p) => p >= PRECIP_THRESHOLD);
-        return (hasRain || hasSnow)
-          ? <PrecipChart data={data} hasRain={hasRain} hasSnow={hasSnow} />
-          : <TempChart data={data} />;
-      })()}
+      <TempChart
+        data={data}
+        hasRain={data.rain_chance.some((p) => p >= PRECIP_THRESHOLD)}
+        hasSnow={data.snow_chance.some((p) => p >= PRECIP_THRESHOLD)}
+      />
       <Footer data={data} />
     </div>
   );
