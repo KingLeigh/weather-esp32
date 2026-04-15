@@ -43,24 +43,28 @@ const BORDER = '#000';
 // Mapping from the normalized `weather` strings to Erik Flowers Weather
 // Icons codepoints (Private Use Area of the WeatherIcons TTF). Each entry
 // has a `day` and `night` codepoint; most conditions use the same glyph for
-// both because a "rainy night" icon is indistinguishable from a "rainy day"
-// icon aesthetically. Only sunny/clear and partly_cloudy swap based on
-// `is_day`, because those glyphs contain a sun or moon that needs to match.
-// `scale` is an optional per-icon fontSize multiplier (relative to the
-// container size). Glyphs aren't perfectly normalized in the font — some
-// (notably partly_cloudy, which packs a cloud + sun/moon into one glyph)
-// overflow unless rendered smaller than the default. `dayScale` and
-// `nightScale` optionally override `scale` for one variant, since the day
-// and night glyphs for the same condition may not be drawn at matching
-// optical sizes.
+// Day/night variants (sun/moon visible) are only used for conditions where
+// you can see the sky. For heavy weather (rain, snow, fog, etc.) the sky
+// isn't visible, so a generic icon is used regardless of time of day.
+//
+// `scale` / `dayScale` / `nightScale` are optional fontSize multipliers —
+// some glyphs (especially compound ones like partly_cloudy) overflow their
+// nominal bounding box and need scaling down.
 export const WEATHER_ICONS = {
-  sunny:         { day: '\uf00d', night: '\uf02e' },                                // wi_day_sunny / wi_night_clear
+  // Sky visible — day/night variants
+  sunny:         { day: '\uf00d', night: '\uf02e' },                                   // wi_day_sunny / wi_night_clear
   partly_cloudy: { day: '\uf002', night: '\uf031', dayScale: 0.68, nightScale: 0.76 }, // wi_day_cloudy / wi_night_cloudy
-  cloudy:        { day: '\uf013', night: '\uf013' },                                // wi_cloudy
-  rainy:         { day: '\uf019', night: '\uf019' },                                // wi_rain
-  snowy:         { day: '\uf01b', night: '\uf01b' },                                // wi_snow
-  thunderstorm:  { day: '\uf01e', night: '\uf01e' },                                // wi_thunderstorm
-  fog:           { day: '\uf014', night: '\uf014' },                                // wi_fog
+  haze:          { day: '\uf0b6', night: '\uf04a' },                                   // wi_day_haze / wi_night_fog (no night haze glyph)
+
+  // Sky not visible — same icon day and night
+  cloudy:        { day: '\uf013', night: '\uf013' },                                   // wi_cloudy
+  drizzle:       { day: '\uf01c', night: '\uf01c' },                                   // wi_sprinkle
+  rainy:         { day: '\uf019', night: '\uf019' },                                   // wi_rain
+  sleet:         { day: '\uf0b5', night: '\uf0b5' },                                   // wi_sleet
+  snowy:         { day: '\uf01b', night: '\uf01b' },                                   // wi_snow
+  thunderstorm:  { day: '\uf01e', night: '\uf01e' },                                   // wi_thunderstorm
+  fog:           { day: '\uf014', night: '\uf014' },                                   // wi_fog
+  smoke:         { day: '\uf062', night: '\uf062' },                                   // wi_smoke
 };
 
 // Fallback codepoint for unknown weather strings from the provider.

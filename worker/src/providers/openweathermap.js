@@ -175,31 +175,36 @@ export class OpenWeatherMapProvider extends WeatherProvider {
   }
 
   /**
-   * Map OpenWeatherMap condition IDs to our icon types
+   * Map OpenWeatherMap condition IDs to our icon types.
    * Full list: https://openweathermap.org/weather-conditions
    */
   _mapConditionToIcon(id) {
     // Thunderstorm (2xx)
     if (id >= 200 && id < 300) return 'thunderstorm';
 
-    // Drizzle (3xx) -> rainy
-    if (id >= 300 && id < 400) return 'rainy';
+    // Drizzle (3xx)
+    if (id >= 300 && id < 400) return 'drizzle';
 
-    // Rain (5xx) -> rainy
+    // Rain (5xx)
+    if (id === 511) return 'sleet';                        // freezing rain
     if (id >= 500 && id < 600) return 'rainy';
 
-    // Snow (6xx) -> snowy
+    // Snow (6xx)
+    if (id >= 611 && id <= 616) return 'sleet';            // sleet / shower sleet
     if (id >= 600 && id < 700) return 'snowy';
 
-    // Atmosphere: fog, mist, haze, etc. (7xx)
-    if (id >= 700 && id < 800) return 'fog';
+    // Atmosphere (7xx)
+    if (id === 701 || id === 741) return 'fog';            // mist, fog
+    if (id === 711) return 'smoke';                        // smoke
+    if (id === 721) return 'haze';                         // haze
+    if (id >= 700 && id < 800) return 'fog';               // dust, sand, ash, squall, tornado
 
     // Clear (800)
     if (id === 800) return 'sunny';
 
-    // Clouds
+    // Clouds (80x)
     if (id === 801 || id === 802) return 'partly_cloudy';  // few/scattered clouds
-    if (id === 803 || id === 804) return 'cloudy';          // broken/overcast
+    if (id === 803 || id === 804) return 'cloudy';         // broken/overcast
 
     return 'partly_cloudy';
   }
