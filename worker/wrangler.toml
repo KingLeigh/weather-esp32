@@ -30,6 +30,7 @@ id = "bd1e4ef949604fcc8a02eb116c755dbc"
 WEATHER_PROVIDER = "openweathermap"
 WEATHER_LOCATION = "40.739214,-73.987265"
 
-# Scheduled cron trigger - runs every 3 minutes
+# Cron fires every minute; actual polling interval is controlled by the
+# 'poll_interval' KV key (default 5 min), configurable via the admin page.
 [triggers]
-crons = ["*/3 * * * *"]
+crons = ["* * * * *"]
