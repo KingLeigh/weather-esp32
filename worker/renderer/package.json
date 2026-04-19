@@ -10,7 +10,8 @@
     "preview": "tsx src/preview.js",
     "preview:icons": "tsx src/preview-icons.jsx",
     "preview:weather-icons": "tsx src/preview-weather-icons.jsx",
-    "preview:all": "tsx src/preview-all.js"
+    "preview:all": "tsx src/preview-all.js",
+    "tune:icons": "tsx src/icon-tuner.js"
   },
   "dependencies": {
     "@resvg/resvg-js": "^2.6.2",

@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Precipitation Text Tester</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; max-width: 900px; margin: 40px auto; padding: 0 20px; color: #222; }
+    h1 { margin-bottom: 8px; }
+    .subtitle { color: #666; margin-bottom: 24px; }
+
+    .result { background: #111; color: #fff; font-size: 28px; font-weight: 700; padding: 20px 24px;
+              border-radius: 8px; margin-bottom: 24px; min-height: 72px; display: flex; align-items: center;
+              position: sticky; top: 0; z-index: 100; }
+    .result .text { flex: 1; }
+    .result .debug { font-size: 12px; color: #888; font-weight: 400; margin-top: 8px; }
+
+    h2 { margin: 24px 0 8px; font-size: 16px; color: #555; }
+
+    .time-row { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; }
+    .time-row select, .time-row input { padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; }
+
+    .sliders { display: grid; grid-template-columns: 40px 1fr 40px; gap: 4px 8px; align-items: center; }
+    .sliders .hour-label { font-size: 13px; color: #666; text-align: right; }
+    .sliders .pct-label { font-size: 13px; color: #999; text-align: left; }
+    .sliders input[type=range] { width: 100%; }
+
+    .totals { display: flex; gap: 16px; margin: 16px 0; }
+    .totals label { font-size: 14px; }
+    .totals input { width: 80px; padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px; }
+
+    .presets { margin-bottom: 16px; display: flex; gap: 8px; flex-wrap: wrap; }
+    .presets button { padding: 6px 12px; border: 1px solid #ccc; border-radius: 4px; background: #f5f5f5;
+                      cursor: pointer; font-size: 13px; }
+    .presets button:hover { background: #e8e8e8; }
+
+    .section { border: 1px solid #eee; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+    .section-title { font-weight: 600; margin-bottom: 8px; }
+  </style>
+</head>
+<body>
+  <h1>Precipitation Text Tester</h1>
+  <p class="subtitle">Uses the exact same algorithm as the weather display layout</p>
+
+  <div class="result">
+    <div>
+      <div class="text" id="result-text">Loading...</div>
+      <div class="debug" id="result-debug"></div>
+    </div>
+  </div>
+
+  <h2>Current Time</h2>
+  <div class="time-row">
+    <select id="current-hour"></select>
+    <span>:00</span>
+  </div>
+
+  <h2>Presets</h2>
+  <div class="presets">
+    <button onclick="loadPreset('clear')">Clear skies</button>
+    <button onclick="loadPreset('light-afternoon')">Light rain afternoon</button>
+    <button onclick="loadPreset('heavy-now')">Heavy rain now</button>
+    <button onclick="loadPreset('evening-likely')">Rain likely evening</button>
+    <button onclick="loadPreset('overnight')">Rain overnight</button>
+    <button onclick="loadPreset('tomorrow')">Rain tomorrow</button>
+    <button onclick="loadPreset('rain-then-snow')">Rain now, snow tonight</button>
+    <button onclick="loadPreset('snow-only')">Snow this morning</button>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Rain % (hourly, next 24h)</div>
+    <div class="sliders" id="rain-sliders"></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Snow % (hourly, next 24h)</div>
+    <div class="sliders" id="snow-sliders"></div>
+  </div>
+
+  <h2>Daily Totals (inches)</h2>
+  <div class="totals">
+    <label>Rain: <input type="number" id="rain-in" value="0" step="0.01" min="0" onchange="update()"></label>
+    <label>Snow: <input type="number" id="snow-in" value="0" step="0.01" min="0" onchange="update()"></label>
+  </div>
+
+<script>
+// ─── Algorithm (copied verbatim from layout.jsx) ────────────────────────────
+
+const PRECIP_THRESHOLD = 5;
+const TEXT_THRESHOLD = 20;
+
+function parseLocalHour(updated) {
+  const m = /T(\d{2})/.exec(updated ?? '');
+  return m ? parseInt(m[1], 10) : 0;
+}
+
+function generateSummary(rain_chance, snow_chance, rain_in, snow_in, currentHour) {
+  const updated = `2026-01-01T${String(currentHour).padStart(2,'0')}:00:00`;
+  const nowH = currentHour;
+
+  const hasRain = rain_chance.some((p) => p >= PRECIP_THRESHOLD);
+  const hasSnow = snow_chance.some((p) => p >= PRECIP_THRESHOLD);
+  const hasPrecip = hasRain || hasSnow;
+
+  const periodForOffset = (offset) => {
+    if (offset === 0) return 'now';
+    const clockH = (nowH + offset) % 24;
+    const isNextDay = nowH + offset >= 24;
+    if (isNextDay && clockH >= 6) return 'tomorrow';
+    if (clockH >= 6 && clockH < 12) return 'this morning';
+    if (clockH >= 12 && clockH < 18) return 'this afternoon';
+    if (clockH >= 18) return 'this evening';
+    return 'overnight';
+  };
+
+  const describeSingleType = (chances, typeNoun, typeVerb) => {
+    const typeCap = typeNoun[0].toUpperCase() + typeNoun.slice(1);
+    const peak = Math.max(...chances);
+    if (peak < PRECIP_THRESHOLD) return null;
+
+    const firstSignificant = chances.findIndex((p) => p >= TEXT_THRESHOLD);
+    if (firstSignificant === -1) return null;
+
+    const period = periodForOffset(firstSignificant);
+    const isTomorrow = period === 'tomorrow';
+
+    // NWS thresholds: 20-50% = "Chance", 60-70% = "Likely", 80%+ = definitive
+    let desc;
+    if (peak <= 50) {
+      desc = `Chance of ${typeNoun} ${period}`;
+    } else if (peak <= 70) {
+      desc = period === 'now' ? `${typeCap} likely now` : `${typeCap} likely ${period}`;
+    } else {
+      desc = period === 'now' ? `${typeVerb} now` : `${typeCap} ${period}`;
+    }
+
+    return { desc, isTomorrow, peak, firstHour: firstSignificant };
+  };
+
+  if (!hasPrecip) {
+    return { text: '', debug: 'No precip above threshold' };
+  }
+
+  const rainResult = hasRain ? describeSingleType(rain_chance, 'rain', 'Raining') : null;
+  const snowResult = hasSnow ? describeSingleType(snow_chance, 'snow', 'Snowing') : null;
+
+  let result, amount;
+  if (rainResult && snowResult) {
+    if (rainResult.firstHour <= snowResult.firstHour) {
+      result = rainResult; amount = rain_in;
+    } else {
+      result = snowResult; amount = snow_in;
+    }
+  } else if (rainResult) {
+    result = rainResult; amount = rain_in;
+  } else {
+    result = snowResult; amount = snow_in;
+  }
+
+  if (!result) {
+    return { text: '', debug: 'Precip on chart but below text threshold' };
+  }
+
+  const showTotal = result.peak > 50 && amount > 0 && !result.isTomorrow;
+  const text = showTotal ? `${result.desc} · ${String(amount)}" today` : result.desc;
+
+  const debug = `peak=${result.peak}% first_hour=${result.firstHour} period=${result.isTomorrow ? 'tomorrow' : 'today'}`;
+  return { text, debug };
+}
+
+// ─── UI ──────────────────────────────────────────────────────────────────────
+
+const hourSelect = document.getElementById('current-hour');
+for (let h = 0; h < 24; h++) {
+  const opt = document.createElement('option');
+  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+  const ap = h < 12 ? 'am' : 'pm';
+  opt.value = h;
+  opt.textContent = `${h12}${ap} (${String(h).padStart(2,'0')}:00)`;
+  hourSelect.appendChild(opt);
+}
+hourSelect.value = new Date().getHours();
+hourSelect.addEventListener('change', update);
+
+function buildSliders(containerId, prefix) {
+  const container = document.getElementById(containerId);
+  const currentHour = parseInt(hourSelect.value);
+  container.innerHTML = '';
+  for (let i = 0; i < 24; i++) {
+    const clockH = (currentHour + i) % 24;
+    const h12 = clockH === 0 ? 12 : clockH > 12 ? clockH - 12 : clockH;
+    const ap = clockH < 12 ? 'a' : 'p';
+
+    const label = document.createElement('div');
+    label.className = 'hour-label';
+    label.textContent = `${h12}${ap}`;
+
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.min = 0;
+    slider.max = 100;
+    slider.value = 0;
+    slider.id = `${prefix}-${i}`;
+    slider.addEventListener('input', update);
+
+    const pct = document.createElement('div');
+    pct.className = 'pct-label';
+    pct.id = `${prefix}-${i}-pct`;
+    pct.textContent = '0%';
+
+    container.appendChild(label);
+    container.appendChild(slider);
+    container.appendChild(pct);
+  }
+}
+
+function getSliderValues(prefix) {
+  const values = [];
+  for (let i = 0; i < 24; i++) {
+    values.push(parseInt(document.getElementById(`${prefix}-${i}`).value));
+  }
+  return values;
+}
+
+function setSliderValues(prefix, values) {
+  for (let i = 0; i < 24; i++) {
+    document.getElementById(`${prefix}-${i}`).value = values[i] || 0;
+    document.getElementById(`${prefix}-${i}-pct`).textContent = `${values[i] || 0}%`;
+  }
+}
+
+function update() {
+  // Update pct labels
+  for (const prefix of ['rain', 'snow']) {
+    for (let i = 0; i < 24; i++) {
+      const val = document.getElementById(`${prefix}-${i}`).value;
+      document.getElementById(`${prefix}-${i}-pct`).textContent = `${val}%`;
+    }
+  }
+
+  const rain_chance = getSliderValues('rain');
+  const snow_chance = getSliderValues('snow');
+  const rain_in = parseFloat(document.getElementById('rain-in').value) || 0;
+  const snow_in = parseFloat(document.getElementById('snow-in').value) || 0;
+  const currentHour = parseInt(hourSelect.value);
+
+  const { text, debug } = generateSummary(rain_chance, snow_chance, rain_in, snow_in, currentHour);
+  document.getElementById('result-text').textContent = text;
+  document.getElementById('result-debug').textContent = debug;
+}
+
+// ─── Presets ─────────────────────────────────────────────────────────────────
+
+const presets = {
+  'clear': { hour: 10, rain: Array(24).fill(0), snow: Array(24).fill(0), rain_in: 0, snow_in: 0 },
+  'light-afternoon': { hour: 10, rain: [0,0,0,0,10,15,20,15,10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0], snow: Array(24).fill(0), rain_in: 0, snow_in: 0 },
+  'heavy-now': { hour: 15, rain: [80,75,60,40,20,10,5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0], snow: Array(24).fill(0), rain_in: 1.2, snow_in: 0 },
+  'evening-likely': { hour: 14, rain: [0,0,0,0,10,25,40,50,45,30,15,5,0,0,0,0,0,0,0,0,0,0,0,0], snow: Array(24).fill(0), rain_in: 0.45, snow_in: 0 },
+  'overnight': { hour: 20, rain: [0,0,0,0,5,20,35,40,30,15,5,0,0,0,0,0,0,0,0,0,0,0,0,0], snow: Array(24).fill(0), rain_in: 0.3, snow_in: 0 },
+  'tomorrow': { hour: 20, rain: [0,0,0,0,0,0,0,0,0,0,10,20,25,20,15,0,0,0,0,0,0,0,0,0], snow: Array(24).fill(0), rain_in: 0.3, snow_in: 0 },
+  'rain-then-snow': { hour: 15, rain: [70,60,40,20,5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0], snow: [0,0,0,0,0,10,25,40,50,40,20,5,0,0,0,0,0,0,0,0,0,0,0,0], rain_in: 0.8, snow_in: 0.5 },
+  'snow-only': { hour: 6, rain: Array(24).fill(0), snow: [5,15,30,45,50,40,25,10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0], rain_in: 0, snow_in: 1.0 },
+};
+
+function loadPreset(name) {
+  const p = presets[name];
+  hourSelect.value = p.hour;
+  buildSliders('rain-sliders', 'rain');
+  buildSliders('snow-sliders', 'snow');
+  setSliderValues('rain', p.rain);
+  setSliderValues('snow', p.snow);
+  document.getElementById('rain-in').value = p.rain_in;
+  document.getElementById('snow-in').value = p.snow_in;
+  update();
+}
+
+// Rebuild sliders when hour changes (labels shift)
+hourSelect.addEventListener('change', () => {
+  const rain = getSliderValues('rain');
+  const snow = getSliderValues('snow');
+  buildSliders('rain-sliders', 'rain');
+  buildSliders('snow-sliders', 'snow');
+  setSliderValues('rain', rain);
+  setSliderValues('snow', snow);
+  update();
+});
+
+// Init
+buildSliders('rain-sliders', 'rain');
+buildSliders('snow-sliders', 'snow');
+update();
+</script>
+</body>
+</html>

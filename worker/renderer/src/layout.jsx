@@ -50,21 +50,24 @@ const BORDER = '#000';
 // `scale` / `dayScale` / `nightScale` are optional fontSize multipliers —
 // some glyphs (especially compound ones like partly_cloudy) overflow their
 // nominal bounding box and need scaling down.
+// `yOffset` / `dayYOffset` / `nightYOffset` shift the glyph vertically (in px,
+// negative = up) to correct for icons where the visual weight sits low or
+// high within the font's baseline.
 export const WEATHER_ICONS = {
   // Sky visible — day/night variants
-  sunny:         { day: '\uf00d', night: '\uf02e' },                                   // wi_day_sunny / wi_night_clear
-  partly_cloudy: { day: '\uf002', night: '\uf031', dayScale: 0.68, nightScale: 0.76 }, // wi_day_cloudy / wi_night_cloudy
-  haze:          { day: '\uf0b6', night: '\uf04a' },                                   // wi_day_haze / wi_night_fog (no night haze glyph)
+  sunny:         { day: '\uf00d', night: '\uf02e' },                                                      // wi_day_sunny / wi_night_clear
+  partly_cloudy: { day: '\uf002', night: '\uf031', dayScale: 0.68, nightScale: 0.76, dayYOffset: 28 },    // wi_day_cloudy / wi_night_cloudy
+  haze:          { day: '\uf0b6', night: '\uf04a', nightYOffset: -12 },                                   // wi_day_haze / wi_night_fog (no night haze glyph)
 
   // Sky not visible — same icon day and night
-  cloudy:        { day: '\uf013', night: '\uf013' },                                   // wi_cloudy
-  drizzle:       { day: '\uf01c', night: '\uf01c' },                                   // wi_sprinkle
-  rainy:         { day: '\uf019', night: '\uf019' },                                   // wi_rain
-  sleet:         { day: '\uf0b5', night: '\uf0b5' },                                   // wi_sleet
-  snowy:         { day: '\uf01b', night: '\uf01b' },                                   // wi_snow
-  thunderstorm:  { day: '\uf01e', night: '\uf01e' },                                   // wi_thunderstorm
-  fog:           { day: '\uf014', night: '\uf014' },                                   // wi_fog
-  smoke:         { day: '\uf062', night: '\uf062' },                                   // wi_smoke
+  cloudy:        { day: '\uf013', night: '\uf013', yOffset: -2 },                                         // wi_cloudy
+  drizzle:       { day: '\uf01c', night: '\uf01c', yOffset: -14 },                                        // wi_sprinkle
+  rainy:         { day: '\uf019', night: '\uf019', yOffset: -40 },                                        // wi_rain
+  sleet:         { day: '\uf0b5', night: '\uf0b5', yOffset: -46 },                                        // wi_sleet
+  snowy:         { day: '\uf01b', night: '\uf01b', yOffset: -46 },                                        // wi_snow
+  thunderstorm:  { day: '\uf01e', night: '\uf01e', yOffset: -46 },                                        // wi_thunderstorm
+  fog:           { day: '\uf014', night: '\uf014', yOffset: -26 },                                        // wi_fog
+  smoke:         { day: '\uf062', night: '\uf062' },                                                      // wi_smoke
 };
 
 // Fallback codepoint for unknown weather strings from the provider.
@@ -161,6 +164,14 @@ function resolveIconScale(entry, isDay) {
   return DEFAULT_ICON_SCALE;
 }
 
+function resolveIconYOffset(entry, isDay) {
+  if (!entry) return 0;
+  if (isDay === false && entry.nightYOffset != null) return entry.nightYOffset;
+  if (isDay !== false && entry.dayYOffset != null) return entry.dayYOffset;
+  if (entry.yOffset != null) return entry.yOffset;
+  return 0;
+}
+
 export function WeatherIcon({ weather, isDay, size }) {
   const entry = WEATHER_ICONS[weather];
   const codepoint = entry
@@ -174,6 +185,10 @@ export function WeatherIcon({ weather, isDay, size }) {
   // glyphs that are bigger than average (e.g., partly_cloudy).
   const scale = resolveIconScale(entry, isDay);
   const fontSize = Math.round(size * scale);
+  // yOffset shifts the glyph vertically. Negative = up, positive = down.
+  // Satori's flexbox subset doesn't support CSS transforms, so we use
+  // `marginTop` to nudge the rendered glyph within its container.
+  const yOffset = resolveIconYOffset(entry, isDay);
 
   return (
     <div
@@ -195,6 +210,7 @@ export function WeatherIcon({ weather, isDay, size }) {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
+          marginTop: yOffset,
         }}
       >
         {codepoint}
@@ -483,39 +499,107 @@ function ForecastChart({ data, hasRain, hasSnow }) {
 
   // ── Title + summary ───────────────────────────────────────────────
   const hasPrecip = hasRain || hasSnow;
-  const leftLabel = '24H FORECAST';
 
-  const formatHour = (hourOffset) => {
-    const nowH = parseLocalHour(updated);
-    const h24 = (nowH + hourOffset) % 24;
-    const h12 = h24 === 0 ? 12 : h24 > 12 ? h24 - 12 : h24;
-    const ap = h24 < 12 ? 'am' : 'pm';
-    return `${h12}${ap}`;
+  // Precipitation summary — confidence-aware, with natural time periods.
+  //
+  // Confidence tiers based on peak probability:
+  //   < 20%  → no text (chart bars still visible if above PRECIP_THRESHOLD)
+  //   5-30%  → "Chance of {type} {period}"
+  //   30-60% → "{Type} likely {period}"
+  //   > 60%  → "{Type} {period}" / "{Type-ing} now"
+  //
+  // Time periods (based on clock hour of first significant probability):
+  //   Hour 0           → "now"
+  //   6am-12pm         → "this morning"
+  //   12pm-6pm         → "this afternoon"
+  //   6pm-12am         → "this evening"
+  //   12am-6am         → "overnight"
+  //   6am+ next day    → "tomorrow"
+  //
+  // Daily total appended as "· X.X" today" only when confidence > 30%
+  // AND total > 0 AND period is not "tomorrow" (different calendar day).
+
+  const nowH = parseLocalHour(updated);
+
+  // Map an hour offset (0-23) to a named time period.
+  const periodForOffset = (offset) => {
+    if (offset === 0) return 'now';
+    const clockH = (nowH + offset) % 24;
+    const isNextDay = nowH + offset >= 24;
+    if (isNextDay && clockH >= 6) return 'tomorrow';
+    if (clockH >= 6 && clockH < 12) return 'this morning';
+    if (clockH >= 12 && clockH < 18) return 'this afternoon';
+    if (clockH >= 18) return 'this evening';
+    return 'overnight'; // 0-6
   };
 
-  const describePrecip = (chances, label) => {
-    const isNow = chances[0] >= PRECIP_THRESHOLD;
-    if (isNow) {
-      const stopIdx = chances.findIndex((p) => p < PRECIP_THRESHOLD);
-      if (stopIdx === -1) return `${label} now`;
-      return `${label} until ${formatHour(stopIdx)}`;
+  // Confidence thresholds aligned with NWS (National Weather Service)
+  // standard probability-to-language mappings:
+  //   < 20%   — not mentioned in text (bars still render on chart)
+  //   20-50%  — "Chance of rain"
+  //   60-70%  — "Rain likely"
+  //   80%+    — "Rain" / "Raining"
+  // Ref: https://www.weather.gov/media/pah/WeatherEducation/pop.pdf
+  //      https://forecast.weather.gov/glossary.php?word=slight+chance
+  const TEXT_THRESHOLD = 20;
+
+  const describeSingleType = (chances, typeNoun, typeVerb) => {
+    const typeCap = typeNoun[0].toUpperCase() + typeNoun.slice(1);
+    const peak = Math.max(...chances);
+    if (peak < PRECIP_THRESHOLD) return null; // no bars on chart either
+
+    // Find first hour above TEXT_THRESHOLD for the time description.
+    const firstSignificant = chances.findIndex((p) => p >= TEXT_THRESHOLD);
+    if (firstSignificant === -1) return null; // bars show but too low for text
+
+    const period = periodForOffset(firstSignificant);
+    const isTomorrow = period === 'tomorrow';
+
+    let desc;
+    if (peak <= 50) {
+      desc = `Chance of ${typeNoun} ${period}`;
+    } else if (peak <= 70) {
+      desc = period === 'now' ? `${typeCap} likely now` : `${typeCap} likely ${period}`;
+    } else {
+      // 80%+ — high confidence, use present tense for "now"
+      desc = period === 'now' ? `${typeVerb} now` : `${typeCap} ${period}`;
     }
-    const startIdx = chances.findIndex((p) => p >= PRECIP_THRESHOLD);
-    return `${label} from ${formatHour(startIdx)}`;
+
+    return { desc, isTomorrow, peak, firstHour: firstSignificant };
   };
 
+  // Pick the most relevant precipitation type to describe in text.
+  // When both rain and snow are present, describe whichever comes first
+  // (i.e., is most imminent). If the earlier one doesn't meet the text
+  // threshold, fall through to the later one. The chart handles the
+  // visual representation of both types.
   let rightSummary = '';
   if (!hasPrecip) {
-    rightSummary = 'No umbrella needed!';
-  } else if (hasRain && hasSnow) {
-    const totalIn = (data.rain_in || 0) + (data.snow_in || 0);
-    rightSummary = totalIn > 0 ? `Rain + Snow · ${String(totalIn)}" total` : 'Rain + Snow';
+    rightSummary = '';
   } else {
-    const desc = hasRain
-      ? describePrecip(rain_chance, 'Rain')
-      : describePrecip(snow_chance, 'Snow');
-    const amount = hasRain ? data.rain_in : data.snow_in;
-    rightSummary = amount > 0 ? `${desc} · ${String(amount)}" total` : desc;
+    const rainResult = hasRain ? describeSingleType(rain_chance, 'rain', 'Raining') : null;
+    const snowResult = hasSnow ? describeSingleType(snow_chance, 'snow', 'Snowing') : null;
+
+    // Pick the earliest, or whichever is non-null.
+    let result, amount;
+    if (rainResult && snowResult) {
+      if (rainResult.firstHour <= snowResult.firstHour) {
+        result = rainResult; amount = data.rain_in;
+      } else {
+        result = snowResult; amount = data.snow_in;
+      }
+    } else if (rainResult) {
+      result = rainResult; amount = data.rain_in;
+    } else {
+      result = snowResult; amount = data.snow_in;
+    }
+
+    if (!result) {
+      rightSummary = '';
+    } else {
+      const showTotal = result.peak > 50 && amount > 0 && !result.isTomorrow;
+      rightSummary = showTotal ? `${result.desc} · ${String(amount)}" today` : result.desc;
+    }
   }
 
   return (
@@ -526,17 +610,27 @@ function ForecastChart({ data, hasRain, hasSnow }) {
         padding: `10px ${PAGE_PADDING_X}px 0 ${PAGE_PADDING_X}px`,
       }}
     >
+      {/* Title row: fixed height so the chart below doesn't shift when
+          the summary text is empty, and so long strings can't wrap onto
+          a second line and push the chart off the bottom of the frame. */}
       <div
         style={{
           display: 'flex',
           flexDirection: 'row',
-          alignItems: 'baseline',
+          alignItems: 'center',
           color: FG_MUTED,
+          height: 50,
           marginBottom: 18,
         }}
       >
-        <div style={{ fontSize: 24, fontWeight: 600, letterSpacing: 1.5 }}>{leftLabel}</div>
-        <div style={{ marginLeft: 'auto', letterSpacing: 0, fontSize: 42, fontWeight: 700 }}>
+        <div
+          style={{
+            marginLeft: 'auto',
+            fontSize: 42,
+            fontWeight: 700,
+            whiteSpace: 'nowrap',
+          }}
+        >
           {rightSummary}
         </div>
       </div>

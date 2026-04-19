@@ -41,9 +41,6 @@ export class OpenWeatherMapProvider extends WeatherProvider {
     const rain_chance = [];
     const snow_chance = [];
     const hourly_temp = [];
-    let totalRainMm = 0;
-    let totalSnowMm = 0;
-
     for (let i = 0; i < 24 && i < hourly.length; i++) {
       const h = hourly[i];
       const pop = Math.round((h.pop || 0) * 100);
@@ -66,8 +63,6 @@ export class OpenWeatherMapProvider extends WeatherProvider {
         snow_chance.push(0);
       }
 
-      totalRainMm += rainVol;
-      totalSnowMm += snowVol;
       hourly_temp.push(Math.round(h.temp));
     }
 
@@ -103,8 +98,8 @@ export class OpenWeatherMapProvider extends WeatherProvider {
       rain_chance,
       snow_chance,
       hourly_temp,
-      rain_in: Math.round(totalRainMm / 25.4 * 100) / 100,  // next-24h total, mm → inches
-      snow_in: Math.round(totalSnowMm / 25.4 * 100) / 100,
+      rain_in: Math.round((daily.rain || 0) / 25.4 * 100) / 100,  // daily total, mm → inches
+      snow_in: Math.round((daily.snow || 0) / 25.4 * 100) / 100,
       uv: {
         current: uvCurrent,
         high: uvHigh
