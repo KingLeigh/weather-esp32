@@ -182,25 +182,36 @@ export function SplashFrame() {
           </div>
           <div
             style={{
-              fontSize: 36,
+              fontSize: 32,
               fontWeight: 700,
               color: FG,
               lineHeight: 1.25,
               marginTop: 14,
             }}
           >
-            1. Connect to USB power
+            1. Ensure device is charged
           </div>
           <div
             style={{
-              fontSize: 36,
+              fontSize: 32,
               fontWeight: 700,
               color: FG,
               lineHeight: 1.25,
               marginTop: 6,
             }}
           >
-            2. Scan QR code with phone
+            2. Press and hold middle button
+          </div>
+          <div
+            style={{
+              fontSize: 32,
+              fontWeight: 700,
+              color: FG,
+              lineHeight: 1.25,
+              marginTop: 6,
+            }}
+          >
+            3. Scan QR code with phone
           </div>
         </div>
 

@@ -27,6 +27,10 @@
 #include "firasans.h"
 #include "wifi_config.h"
 
+#ifdef SPLASH_TEST_MODE
+#include "splash_png.h"
+#endif
+
 // ─── constants ───────────────────────────────────────────────────────────────
 
 #define SLEEP_MINUTES        5
@@ -398,6 +402,26 @@ void setup() {
         return;
     }
     memset(framebuffer, 0xFF, EPD_WIDTH * EPD_HEIGHT / 2);
+
+#ifdef SPLASH_TEST_MODE
+    Serial.println("SPLASH_TEST_MODE: rendering bundled splash, no network.");
+    int splashRc = png.openRAM((uint8_t *)splash_png, splash_png_len, png_draw_callback);
+    if (splashRc != PNG_SUCCESS) {
+        Serial.printf("Splash openRAM failed: %d\n", splashRc);
+    } else {
+        Serial.printf("Splash: %dx%d, bpp=%d\n",
+                      png.getWidth(), png.getHeight(), png.getBpp());
+        splashRc = png.decode(nullptr, 0);
+        png.close();
+        if (splashRc == PNG_SUCCESS) {
+            pushDisplay();
+        } else {
+            Serial.printf("Splash decode failed: %d\n", splashRc);
+        }
+    }
+    enterDeepSleep();
+    return;
+#endif
 
     // Calibrate ADC (for battery reading).
     calibrateADC();
