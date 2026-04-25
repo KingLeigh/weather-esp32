@@ -8,6 +8,7 @@
     "postinstall": "node scripts/fetch-fonts.js",
     "setup": "node scripts/fetch-fonts.js",
     "preview": "tsx src/preview.js",
+    "preview:splash": "tsx src/preview-splash.jsx",
     "preview:icons": "tsx src/preview-icons.jsx",
     "preview:weather-icons": "tsx src/preview-weather-icons.jsx",
     "preview:all": "tsx src/preview-all.js",
