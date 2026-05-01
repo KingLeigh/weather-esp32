@@ -507,34 +507,44 @@ void setup() {
         Serial.println("No NVS config — device not yet set up.");
     }
 
-    // ── Setup-mode / no-config path ──────────────────────────────────────
-    // Entered when the user long-pressed the button (wantSetup) OR when there
-    // is no NVS config (in which case we just show the splash and wait for
-    // the user to actually press the button to enter setup).
-    if (wantSetup || !hasConfig) {
-        // Force a splash redraw on long-press for visual feedback that the
-        // button registered. Otherwise honor splash_already_drawn so we don't
-        // re-flash the panel on every wake while idle on the splash screen.
-        if (wantSetup || !splash_already_drawn) {
+    // ── Setup-mode entry (long-press) ────────────────────────────────────
+    if (wantSetup) {
+        Serial.println("Long-press: rendering splash and entering setup mode.");
+        renderSplash();
+        splash_already_drawn = true;
+
+        // Returns on idle timeout. On successful save, esp_restart()s and
+        // never returns — we only reach the next line if the user gave up.
+        enterSetupMode();
+
+        if (!hasConfig) {
+            // Fresh device, user canceled setup. Stay on splash, button-only sleep.
+            Serial.println("Setup canceled with no existing config — sleeping until button.");
+            enterDeepSleep(/*armTimer=*/false);
+            return;
+        }
+
+        // We had existing config and the user changed nothing. Fall through to
+        // the normal weather flow — the device should always try to return to
+        // weather when it can. Force a display refresh because the splash is
+        // currently on screen; otherwise change detection would skip the push
+        // when the fetched PNG matches the previously-displayed weather.
+        Serial.println("Setup canceled — attempting to return to weather.");
+        prev_png_hash = 0;
+        // fall through ↓
+    } else if (!hasConfig) {
+        // No setup requested + no NVS config: show splash, wait for button.
+        if (!splash_already_drawn) {
             renderSplash();
             splash_already_drawn = true;
         } else {
             Serial.println("Splash already drawn — skipping refresh.");
         }
-
-        if (wantSetup) {
-            // Returns on idle timeout. esp_restart()s on successful save.
-            enterSetupMode();
-        }
-
-        // No useful periodic work in this state — only the button can rescue
-        // us if we have no config. With config (rare: setup mode timed out
-        // without saving), keep the timer wake so weather retries normally.
-        enterDeepSleep(/*armTimer=*/hasConfig);
+        enterDeepSleep(/*armTimer=*/false);
         return;
     }
 
-    // ── Normal weather flow (have config, not entering setup) ────────────
+    // ── Normal weather flow ──────────────────────────────────────────────
     // Reset the splash-drawn flag so a future drop back to no-config (e.g.
     // after factory reset in setup mode) triggers a fresh splash render.
     splash_already_drawn = false;
