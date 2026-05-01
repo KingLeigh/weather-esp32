@@ -36,7 +36,9 @@
 // ─── constants ───────────────────────────────────────────────────────────────
 
 #define SLEEP_MINUTES        10
-#define SLEEP_US             ((uint64_t)SLEEP_MINUTES * 60 * 1000000ULL)
+// Shorter wake interval after a failed fetch — recover faster from transient
+// outages without burning extra battery in the steady-state success case.
+#define RETRY_SLEEP_MINUTES  5
 
 // SERVER_BASE_URL lives in config.h (used by both main + setup_mode).
 
@@ -459,8 +461,10 @@ void renderSplash(const char *wifiJoinStr) {
 
 // armTimer=false: only the button wakes the chip (used in the no-config state
 // where there's nothing useful to retry on a periodic timer). armTimer=true:
-// both timer + button (normal weather operation).
-static void enterDeepSleep(bool armTimer = true) {
+// both timer + button (normal weather operation). The caller picks the timer
+// interval — typically SLEEP_MINUTES on success, RETRY_SLEEP_MINUTES on a
+// failed fetch so we recover from transient WiFi/server blips faster.
+static void enterDeepSleep(bool armTimer = true, uint32_t timerMinutes = SLEEP_MINUTES) {
 #ifdef KEEP_AWAKE
     // Debug build: skip real deep sleep so USB CDC stays alive across "wakes".
     // Soft-restart after a short delay to simulate the wake cycle quickly.
@@ -473,8 +477,8 @@ static void enterDeepSleep(bool armTimer = true) {
 #endif
 
     if (armTimer) {
-        Serial.printf("Sleeping for %d min (or button on IO%d)...\n",
-                      SLEEP_MINUTES, (int)BUTTON_GPIO);
+        Serial.printf("Sleeping for %u min (or button on IO%d)...\n",
+                      (unsigned)timerMinutes, (int)BUTTON_GPIO);
     } else {
         Serial.printf("Sleeping until button on IO%d (no timer wake)...\n",
                       (int)BUTTON_GPIO);
@@ -488,7 +492,8 @@ static void enterDeepSleep(bool armTimer = true) {
 
     esp_sleep_enable_ext0_wakeup(BUTTON_GPIO, 0);  // wake when button pulled LOW
     if (armTimer) {
-        esp_sleep_enable_timer_wakeup(SLEEP_US);
+        uint64_t us = (uint64_t)timerMinutes * 60ULL * 1000000ULL;
+        esp_sleep_enable_timer_wakeup(us);
     }
     esp_deep_sleep_start();
     // Never reaches here.
@@ -657,7 +662,11 @@ void setup() {
     // Free PNG buffer before sleep.
     if (pngBuf) { free(pngBuf); pngBuf = nullptr; pngLen = 0; }
 
-    enterDeepSleep();
+    // Shorter retry interval if we couldn't fetch — recover from transient
+    // WiFi/server outages quickly, without burning extra battery on the
+    // steady-state success case.
+    enterDeepSleep(/*armTimer=*/true,
+                   fetchOk ? SLEEP_MINUTES : RETRY_SLEEP_MINUTES);
 }
 
 void loop() {
