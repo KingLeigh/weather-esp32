@@ -35,7 +35,7 @@
 
 // ─── constants ───────────────────────────────────────────────────────────────
 
-#define SLEEP_MINUTES        5
+#define SLEEP_MINUTES        10
 #define SLEEP_US             ((uint64_t)SLEEP_MINUTES * 60 * 1000000ULL)
 
 // SERVER_BASE_URL lives in config.h (used by both main + setup_mode).
