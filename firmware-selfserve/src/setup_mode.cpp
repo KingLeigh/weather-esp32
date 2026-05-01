@@ -1,5 +1,6 @@
 #include "setup_mode.h"
 #include "config.h"
+#include "render.h"
 
 #include <Arduino.h>
 #include <WiFi.h>
@@ -12,7 +13,7 @@
 
 // ─── tunables ────────────────────────────────────────────────────────────────
 
-#define IDLE_TIMEOUT_MS  (5UL * 60UL * 1000UL)  // 5 min of no HTTP activity
+#define IDLE_TIMEOUT_MS  (3UL * 60UL * 1000UL)  // 3 min of no HTTP activity
 #define WIFI_CONNECT_MS  20000                  // STA connect timeout in /save
 #define DNS_PORT         53
 #define HTTP_PORT        80
@@ -289,6 +290,12 @@ void enterSetupMode() {
     apIp = WiFi.softAPIP();
     Serial.printf("Setup: AP %s SSID='%s' IP=%s\n",
                   apOk ? "up" : "FAILED", apSsid.c_str(), apIp.toString().c_str());
+
+    // Render splash with WiFi-join QR over the placeholder. iOS/Android scan
+    // this string format as a "join WiFi" intent — one tap and the user's on
+    // the AP, captive-portal popup follows.
+    String wifiJoin = "WIFI:T:nopass;S:" + apSsid + ";;";
+    renderSplash(wifiJoin.c_str());
 
     // DNS hijack: every name resolves to AP IP. Forces phones to load the
     // captive-portal probe from us, which triggers the auto-popup behavior.

@@ -23,12 +23,14 @@
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <PNGdec.h>
+#include <qrcode.h>
 
 #include "epd_driver.h"
 #include "firasans.h"
 
 #include "config.h"
 #include "splash_png.h"
+#include "render.h"
 #include "setup_mode.h"
 
 // ─── constants ───────────────────────────────────────────────────────────────
@@ -47,6 +49,19 @@
 // pull the user out of normal operation.
 #define BUTTON_GPIO          GPIO_NUM_21
 #define BUTTON_HOLD_MS       1500
+
+// QR overlay placement on the splash. Coordinates match the placeholder box
+// in splash.jsx: the bottom-right column of the layout, vertically centered
+// in the 330-px-tall bottom section (210px below the title + icons).
+#define QR_AREA_X      660
+#define QR_AREA_Y      255
+#define QR_AREA_W      240
+#define QR_AREA_H      240
+// Version 4 (33×33 modules) at ECC_M holds 46 bytes — fits a WiFi-join string
+// like "WIFI:T:nopass;S:WhatsTheWeather-XXXX;;" (~38 bytes) with headroom.
+#define QR_VERSION     4
+#define QR_ECC         ECC_MEDIUM
+#define QR_MODULE_PX   6   // 6 × 33 = 198 px QR data, leaves ~21 px white margin
 
 // Staleness threshold: show "Xm ago" / "Xh Ym ago" if data is older than this.
 #define STALE_THRESHOLD_MIN  30
@@ -386,9 +401,38 @@ static void pushDisplay() {
     Serial.printf("Display pushed in %lu ms\n", millis() - t0);
 }
 
-// ─── splash render (bundled PNG, no network) ─────────────────────────────────
+// ─── splash render (bundled PNG, optional QR overlay) ───────────────────────
 
-static void renderSplash() {
+// Draws a WiFi-join QR code over the splash's QR placeholder area. Erases
+// the dashed-border placeholder (white-fills the area), then draws the QR
+// modules in black, centered.
+static void drawQrOverPlaceholder(const char *text) {
+    QRCode qr;
+    uint8_t buf[qrcode_getBufferSize(QR_VERSION)];
+    qrcode_initText(&qr, buf, QR_VERSION, QR_ECC, text);
+
+    // Wipe the placeholder (including the dashed outline + "QR" text).
+    epd_fill_rect(QR_AREA_X, QR_AREA_Y, QR_AREA_W, QR_AREA_H, 0xFF, framebuffer);
+
+    // Center the QR data within the placeholder. Surrounding white space
+    // serves as the scanner-required quiet zone.
+    int qrPx   = qr.size * QR_MODULE_PX;
+    int origX  = QR_AREA_X + (QR_AREA_W - qrPx) / 2;
+    int origY  = QR_AREA_Y + (QR_AREA_H - qrPx) / 2;
+
+    for (int y = 0; y < qr.size; y++) {
+        for (int x = 0; x < qr.size; x++) {
+            if (qrcode_getModule(&qr, x, y)) {
+                epd_fill_rect(origX + x * QR_MODULE_PX,
+                              origY + y * QR_MODULE_PX,
+                              QR_MODULE_PX, QR_MODULE_PX,
+                              0x00, framebuffer);
+            }
+        }
+    }
+}
+
+void renderSplash(const char *wifiJoinStr) {
     int rc = png.openRAM((uint8_t *)splash_png, splash_png_len, png_draw_callback);
     if (rc != PNG_SUCCESS) {
         Serial.printf("Splash openRAM failed: %d\n", rc);
@@ -402,6 +446,12 @@ static void renderSplash() {
         Serial.printf("Splash decode failed: %d\n", rc);
         return;
     }
+
+    if (wifiJoinStr) {
+        Serial.printf("Splash: drawing QR for '%s'\n", wifiJoinStr);
+        drawQrOverPlaceholder(wifiJoinStr);
+    }
+
     pushDisplay();
 }
 
@@ -509,12 +559,12 @@ void setup() {
 
     // ── Setup-mode entry (long-press) ────────────────────────────────────
     if (wantSetup) {
-        Serial.println("Long-press: rendering splash and entering setup mode.");
-        renderSplash();
-        splash_already_drawn = true;
+        Serial.println("Long-press: entering setup mode.");
 
-        // Returns on idle timeout. On successful save, esp_restart()s and
-        // never returns — we only reach the next line if the user gave up.
+        // setup_mode brings up the AP and then renders the splash+QR composite
+        // itself (it knows the AP SSID, which is encoded in the QR). It either
+        // esp_restart()s on save success (never returns) or returns on idle
+        // timeout — we only reach the next line if the user gave up.
         enterSetupMode();
 
         if (!hasConfig) {
