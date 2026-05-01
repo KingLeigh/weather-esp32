@@ -106,10 +106,11 @@ function generateSummary(rain_chance, snow_chance, rain_in, snow_in, currentHour
     if (offset === 0) return 'now';
     const clockH = (nowH + offset) % 24;
     const isNextDay = nowH + offset >= 24;
-    if (isNextDay && clockH >= 6) return 'tomorrow';
-    if (clockH >= 6 && clockH < 12) return 'this morning';
-    if (clockH >= 12 && clockH < 18) return 'this afternoon';
-    if (clockH >= 18) return 'this evening';
+    if (isNextDay && clockH >= 4) return 'tomorrow';
+    if (clockH >= 4 && clockH < 12) return 'this morning';
+    if (clockH >= 12 && clockH < 17) return 'this afternoon';
+    if (clockH >= 17 && clockH < 21) return 'this evening';
+    if (clockH >= 21) return 'tonight';
     return 'overnight';
   };
 

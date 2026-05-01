@@ -510,11 +510,12 @@ function ForecastChart({ data, hasRain, hasSnow }) {
   //
   // Time periods (based on clock hour of first significant probability):
   //   Hour 0           → "now"
-  //   6am-12pm         → "this morning"
-  //   12pm-6pm         → "this afternoon"
-  //   6pm-12am         → "this evening"
-  //   12am-6am         → "overnight"
-  //   6am+ next day    → "tomorrow"
+  //   4am-12pm         → "this morning"
+  //   12pm-5pm         → "this afternoon"
+  //   5pm-9pm          → "this evening"
+  //   9pm-12am         → "tonight"
+  //   12am-4am         → "overnight"
+  //   4am+ next day    → "tomorrow"
   //
   // Daily total appended as "· X.X" today" only when confidence > 30%
   // AND total > 0 AND period is not "tomorrow" (different calendar day).
@@ -526,11 +527,12 @@ function ForecastChart({ data, hasRain, hasSnow }) {
     if (offset === 0) return 'now';
     const clockH = (nowH + offset) % 24;
     const isNextDay = nowH + offset >= 24;
-    if (isNextDay && clockH >= 6) return 'tomorrow';
-    if (clockH >= 6 && clockH < 12) return 'this morning';
-    if (clockH >= 12 && clockH < 18) return 'this afternoon';
-    if (clockH >= 18) return 'this evening';
-    return 'overnight'; // 0-6
+    if (isNextDay && clockH >= 4) return 'tomorrow';
+    if (clockH >= 4 && clockH < 12) return 'this morning';
+    if (clockH >= 12 && clockH < 17) return 'this afternoon';
+    if (clockH >= 17 && clockH < 21) return 'this evening';
+    if (clockH >= 21) return 'tonight';
+    return 'overnight'; // 0-4
   };
 
   // Confidence thresholds aligned with NWS (National Weather Service)
