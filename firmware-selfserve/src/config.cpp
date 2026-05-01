@@ -29,7 +29,17 @@ void saveConfig(const DeviceConfig &cfg) {
 
 void clearConfig() {
     Preferences prefs;
-    prefs.begin(NS, /*readOnly=*/false);
-    prefs.clear();
+    if (!prefs.begin(NS, /*readOnly=*/false)) {
+        Serial.println("clearConfig: NVS namespace open failed (already empty?)");
+        return;
+    }
+    bool clearedAll = prefs.clear();
+    // Belt-and-suspenders: explicit removes in case clear() is a no-op for
+    // some NVS edge case. Both ignore "key doesn't exist" silently.
+    prefs.remove("ssid");
+    prefs.remove("password");
+    prefs.remove("zip");
     prefs.end();
+    Serial.printf("clearConfig: clear()=%s + explicit removes done\n",
+                  clearedAll ? "ok" : "fail");
 }

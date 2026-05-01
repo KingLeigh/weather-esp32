@@ -59,6 +59,12 @@ static const char FORM_HTML[] PROGMEM = R"HTML(<!DOCTYPE html>
   #status.err { display: block; background: #fef2f2; color: #b91c1c; border: 1px solid #fca5a5; }
   .hint { font-size: 13px; color: #888; margin-top: 4px; }
   .step-done { color: #15803d; font-size: 14px; margin-bottom: 16px; }
+  .reset-row { margin-top: 24px; text-align: center; }
+  .link-btn { background: none; color: #888; padding: 6px 12px;
+              font-size: 13px; text-decoration: underline;
+              border: none; cursor: pointer; width: auto; margin: 0;
+              font-weight: 400; }
+  .link-btn:hover { color: #b91c1c; background: none; }
 </style>
 </head>
 <body>
@@ -76,6 +82,10 @@ static const char FORM_HTML[] PROGMEM = R"HTML(<!DOCTYPE html>
   <div class="hint">Leave blank for open networks.</div>
 
   <button type="submit" id="connect-btn">Connect</button>
+
+  <div class="reset-row">
+    <button type="button" id="reset-btn" class="link-btn">Factory reset</button>
+  </div>
 </form>
 
 <form id="step2" style="display:none;">
@@ -92,10 +102,25 @@ static const char FORM_HTML[] PROGMEM = R"HTML(<!DOCTYPE html>
 <div id="status"></div>
 
 <script>
-  let creds = null;  // remember WiFi creds across the two steps
+  let creds = null;       // remember WiFi creds across the two steps
+  let stored = { ssid: '', password: '' };  // prefill source — same SSID only
+
+  // Refill the password field if the selected SSID matches the stored one,
+  // else clear it. Lets the owner reconnect to their own network without
+  // retyping the password, while gift recipients on a different network
+  // never see the stored password.
+  function maybePrefillPassword() {
+    const selected = document.getElementById('ssid').value;
+    const pw = document.getElementById('password');
+    if (selected && selected === stored.ssid && stored.password) {
+      pw.value = stored.password;
+    } else {
+      pw.value = '';
+    }
+  }
 
   // ── Populate SSID dropdown from /scan on page load ──
-  fetch('/scan').then(r => r.json()).then(networks => {
+  const scanP = fetch('/scan').then(r => r.json()).then(networks => {
     const sel = document.getElementById('ssid');
     sel.innerHTML = '';
     if (!networks.length) {
@@ -116,6 +141,49 @@ static const char FORM_HTML[] PROGMEM = R"HTML(<!DOCTYPE html>
   }).catch(() => {
     document.getElementById('ssid').innerHTML =
       '<option value="">Scan failed — refresh page</option>';
+  });
+
+  // ── Fetch stored creds + run initial prefill check after both load ──
+  const currentP = fetch('/current').then(r => r.json()).then(c => {
+    stored = c;
+  }).catch(() => { /* leave stored empty — no prefill */ });
+
+  Promise.all([scanP, currentP]).then(maybePrefillPassword);
+  document.getElementById('ssid').addEventListener('change', maybePrefillPassword);
+
+  // ── Factory reset: two-click inline confirmation ──
+  // First click arms the button (text changes, 5s timeout). Second click
+  // within the window actually fires the reset. Avoids confirm() because the
+  // iOS Captive Network Assistant browser silently blocks system dialogs.
+  let resetArmed = false;
+  let resetTimer = null;
+  const resetBtn = document.getElementById('reset-btn');
+
+  resetBtn.addEventListener('click', async () => {
+    if (!resetArmed) {
+      resetArmed = true;
+      resetBtn.textContent = 'Click again to confirm — erases WiFi & location';
+      resetBtn.style.color = '#b91c1c';
+      resetBtn.style.fontWeight = '600';
+      resetTimer = setTimeout(() => {
+        resetArmed = false;
+        resetBtn.textContent = 'Factory reset';
+        resetBtn.style.color = '';
+        resetBtn.style.fontWeight = '';
+      }, 5000);
+      return;
+    }
+
+    clearTimeout(resetTimer);
+    resetBtn.textContent = 'Resetting…';
+    resetBtn.disabled = true;
+    try {
+      await fetch('/reset', { method: 'POST' });
+    } catch (e) { /* chip restarts mid-response — expected */ }
+    document.body.innerHTML =
+      '<h1>Reset complete</h1>' +
+      '<p>The device has restarted with no saved settings. ' +
+      'Press the device button to start setup again, then re-scan the QR code.</p>';
   });
 
   function showError(msg) {
@@ -316,6 +384,37 @@ static bool tryFetchTest(const String &zip) {
     return code == 200;
 }
 
+// Returns the currently-stored WiFi creds so the form can pre-fill the
+// password field IF the user re-selects the same network. Password is sent
+// in cleartext over the AP — acceptable trade-off for the small-trust use
+// case (gifting to friends/family). Recipient on a different WiFi never
+// triggers the prefill since their dropdown won't contain the stored SSID.
+static void handleCurrent() {
+    touchActivity();
+    DeviceConfig cfg;
+    bool has = loadConfig(cfg);
+
+    String resp = "{";
+    resp += "\"ssid\":";
+    appendJsonString(resp, has ? cfg.ssid : String(""));
+    resp += ",\"password\":";
+    appendJsonString(resp, has ? cfg.password : String(""));
+    resp += "}";
+
+    http.send(200, "application/json", resp);
+}
+
+// Wipes all NVS config and restarts the chip. Used by the factory-reset
+// button before gifting the device.
+static void handleReset() {
+    touchActivity();
+    Serial.println("Setup: factory reset — clearing NVS and restarting");
+    clearConfig();
+    http.send(200, "text/plain", "Factory reset complete. Restarting...");
+    delay(1000);  // let the response flush before the chip goes
+    esp_restart();
+}
+
 // Step 1 endpoint. Connects STA to the user's WiFi, then fetches the slim
 // location list from the worker so the form can populate its zip dropdown.
 // Errors distinguish between bad WiFi creds and an unreachable/empty server
@@ -447,8 +546,10 @@ void enterSetupMode() {
 
     http.on("/", handleRoot);
     http.on("/scan", handleScan);
+    http.on("/current", handleCurrent);
     http.on("/connect", HTTP_POST, handleConnect);
     http.on("/save", HTTP_POST, handleSave);
+    http.on("/reset", HTTP_POST, handleReset);
     http.onNotFound(handleNotFound);
     http.begin();
 
