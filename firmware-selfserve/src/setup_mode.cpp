@@ -27,8 +27,12 @@ static String     apSsid;
 static unsigned long lastActivityMs = 0;
 
 // ─── inlined HTML form ───────────────────────────────────────────────────────
-// Single-page app: scans WiFi on load, posts to /save on submit. Kept as a raw
-// string literal so we don't need a build step to bundle it.
+// Two-step single-page app:
+//   Step 1: pick SSID, enter password → POST /connect → tries WiFi + fetches
+//           the registered location list from the worker.
+//   Step 2: pick location from dropdown → POST /save → verifies + writes NVS
+//           + restarts the chip.
+// Kept as a raw string literal so we don't need a build step to bundle it.
 
 static const char FORM_HTML[] PROGMEM = R"HTML(<!DOCTYPE html>
 <html>
@@ -54,13 +58,14 @@ static const char FORM_HTML[] PROGMEM = R"HTML(<!DOCTYPE html>
   #status.ok { display: block; background: #f0fdf4; color: #15803d; border: 1px solid #86efac; }
   #status.err { display: block; background: #fef2f2; color: #b91c1c; border: 1px solid #fca5a5; }
   .hint { font-size: 13px; color: #888; margin-top: 4px; }
+  .step-done { color: #15803d; font-size: 14px; margin-bottom: 16px; }
 </style>
 </head>
 <body>
 <h1>Weather Display Setup</h1>
-<p class="lede">Pick your WiFi network and enter the zip code you want forecasts for.</p>
 
-<form id="f">
+<form id="step1">
+  <p class="lede">First, connect the device to your WiFi.</p>
   <label for="ssid">WiFi Network</label>
   <select id="ssid" name="ssid" required>
     <option value="">Scanning&hellip;</option>
@@ -70,17 +75,26 @@ static const char FORM_HTML[] PROGMEM = R"HTML(<!DOCTYPE html>
   <input type="password" id="password" name="password" autocomplete="current-password">
   <div class="hint">Leave blank for open networks.</div>
 
-  <label for="zip">Zip Code</label>
-  <input type="text" id="zip" name="zip" required pattern="[0-9]{5}" maxlength="5"
-         inputmode="numeric" placeholder="10010">
-  <div class="hint">Must be a zip your device's owner has registered on the server.</div>
-
-  <button type="submit" id="btn">Save &amp; Connect</button>
-  <div id="status"></div>
+  <button type="submit" id="connect-btn">Connect</button>
 </form>
 
+<form id="step2" style="display:none;">
+  <div class="step-done" id="connected-msg">&#10003; Connected to WiFi.</div>
+  <p class="lede">Now pick the location to display.</p>
+  <label for="zip">Location</label>
+  <select id="zip" name="zip" required>
+    <option value="">Loading&hellip;</option>
+  </select>
+
+  <button type="submit" id="save-btn">Save</button>
+</form>
+
+<div id="status"></div>
+
 <script>
-  // Populate SSID dropdown from /scan.
+  let creds = null;  // remember WiFi creds across the two steps
+
+  // ── Populate SSID dropdown from /scan on page load ──
   fetch('/scan').then(r => r.json()).then(networks => {
     const sel = document.getElementById('ssid');
     sel.innerHTML = '';
@@ -88,7 +102,6 @@ static const char FORM_HTML[] PROGMEM = R"HTML(<!DOCTYPE html>
       sel.innerHTML = '<option value="">No networks found — refresh page</option>';
       return;
     }
-    // Dedup by SSID, keep strongest signal.
     const seen = new Map();
     networks.forEach(n => {
       const prev = seen.get(n.ssid);
@@ -105,30 +118,87 @@ static const char FORM_HTML[] PROGMEM = R"HTML(<!DOCTYPE html>
       '<option value="">Scan failed — refresh page</option>';
   });
 
-  document.getElementById('f').addEventListener('submit', async e => {
-    e.preventDefault();
-    const btn = document.getElementById('btn');
+  function showError(msg) {
     const status = document.getElementById('status');
-    btn.disabled = true;
-    btn.textContent = 'Connecting…';
+    status.className = 'err';
+    status.textContent = msg;
+  }
+  function clearStatus() {
+    const status = document.getElementById('status');
     status.className = '';
     status.textContent = '';
+  }
+
+  // ── Step 1: connect to WiFi, fetch location list ──
+  document.getElementById('step1').addEventListener('submit', async e => {
+    e.preventDefault();
+    const btn = document.getElementById('connect-btn');
+    btn.disabled = true;
+    btn.textContent = 'Connecting…';
+    clearStatus();
+
+    const formData = new FormData(e.target);
+    try {
+      const res = await fetch('/connect', { method: 'POST', body: formData });
+      const json = await res.json();
+      if (!json.ok) {
+        showError(json.error || 'Connection failed.');
+        btn.disabled = false;
+        btn.textContent = 'Try Again';
+        return;
+      }
+      // Remember creds for the /save step.
+      creds = { ssid: formData.get('ssid'), password: formData.get('password') };
+
+      // Populate location dropdown.
+      const zipSel = document.getElementById('zip');
+      zipSel.innerHTML = '';
+      if (!json.locations || !json.locations.length) {
+        zipSel.innerHTML = '<option value="">No locations registered on server</option>';
+      } else {
+        json.locations.forEach(loc => {
+          const opt = document.createElement('option');
+          opt.value = loc.zip;
+          opt.textContent = loc.label + ' — ' + loc.zip;
+          zipSel.appendChild(opt);
+        });
+      }
+
+      document.getElementById('step1').style.display = 'none';
+      document.getElementById('step2').style.display = '';
+    } catch (err) {
+      showError('Network error — try again.');
+      btn.disabled = false;
+      btn.textContent = 'Try Again';
+    }
+  });
+
+  // ── Step 2: verify zip, write NVS, restart ──
+  document.getElementById('step2').addEventListener('submit', async e => {
+    e.preventDefault();
+    const btn = document.getElementById('save-btn');
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    clearStatus();
+
+    const fd = new FormData(e.target);
+    fd.set('ssid', creds.ssid);
+    fd.set('password', creds.password);
 
     try {
-      const res = await fetch('/save', { method: 'POST', body: new FormData(e.target) });
+      const res = await fetch('/save', { method: 'POST', body: fd });
       const txt = await res.text();
       if (res.ok) {
+        const status = document.getElementById('status');
         status.className = 'ok';
         status.textContent = txt;
       } else {
-        status.className = 'err';
-        status.textContent = txt;
+        showError(txt);
         btn.disabled = false;
         btn.textContent = 'Try Again';
       }
     } catch (err) {
-      status.className = 'err';
-      status.textContent = 'Network error — try again.';
+      showError('Network error — try again.');
       btn.disabled = false;
       btn.textContent = 'Try Again';
     }
@@ -210,9 +280,19 @@ static bool tryConnect(const char *ssid, const char *password) {
     return ok;
 }
 
-// HEAD/GET the per-zip PNG to verify the zip is registered + reachable.
-static bool tryFetchTest(const String &zip) {
-    String url = String(SERVER_BASE_URL) + "/weather/" + zip + ".png";
+// Avoid reconnecting if we're already on the requested SSID (the /save call
+// usually happens on top of an already-connected /connect).
+static bool tryConnectIfNeeded(const char *ssid, const char *password) {
+    if (WiFi.status() == WL_CONNECTED && WiFi.SSID() == String(ssid)) {
+        Serial.println("Setup: STA already connected to target SSID");
+        return true;
+    }
+    return tryConnect(ssid, password);
+}
+
+// Fetch JSON from a URL into the given String. Returns the HTTP status code,
+// or -1 on transport error.
+static int httpsGetString(const String &url, String &out) {
     WiFiClientSecure client;
     client.setInsecure();
     HTTPClient h;
@@ -220,9 +300,73 @@ static bool tryFetchTest(const String &zip) {
     h.setTimeout(10000);
     h.setConnectTimeout(10000);
     int code = h.GET();
+    if (code == 200) {
+        out = h.getString();
+    }
     h.end();
+    return code;
+}
+
+// GET the per-zip PNG to verify the zip is registered + reachable.
+static bool tryFetchTest(const String &zip) {
+    String url = String(SERVER_BASE_URL) + "/weather/" + zip + ".png";
+    String body;
+    int code = httpsGetString(url, body);
     Serial.printf("Setup: GET %s -> %d\n", url.c_str(), code);
     return code == 200;
+}
+
+// Step 1 endpoint. Connects STA to the user's WiFi, then fetches the slim
+// location list from the worker so the form can populate its zip dropdown.
+// Errors distinguish between bad WiFi creds and an unreachable/empty server
+// so the user can diagnose what's actually wrong.
+static void handleConnect() {
+    touchActivity();
+    String ssid     = http.arg("ssid");
+    String password = http.arg("password");
+
+    if (ssid.length() == 0) {
+        http.send(400, "application/json",
+                  "{\"ok\":false,\"error\":\"Pick a WiFi network.\"}");
+        return;
+    }
+
+    if (!tryConnectIfNeeded(ssid.c_str(), password.c_str())) {
+        WiFi.disconnect(false);  // keep AP up
+        http.send(400, "application/json",
+                  "{\"ok\":false,\"error\":\"Couldn't connect to that WiFi. "
+                  "Check the network name and password.\"}");
+        return;
+    }
+
+    String url = String(SERVER_BASE_URL) + "/locations";
+    String body;
+    int code = httpsGetString(url, body);
+    Serial.printf("Setup: GET %s -> %d\n", url.c_str(), code);
+
+    if (code != 200) {
+        // WiFi connected but worker is unreachable / down / wrong URL. Leave
+        // STA connected so the user can retry without redoing WiFi.
+        char msg[256];
+        snprintf(msg, sizeof(msg),
+                 "{\"ok\":false,\"error\":\"Connected to WiFi, but couldn't reach "
+                 "the weather server (HTTP %d). The server may be down — try again "
+                 "in a minute.\"}", code);
+        http.send(502, "application/json", msg);
+        return;
+    }
+
+    if (body == "[]") {
+        http.send(502, "application/json",
+                  "{\"ok\":false,\"error\":\"Reached the weather server, but it has "
+                  "no locations registered. Ask the device's owner to add one on "
+                  "the admin page.\"}");
+        return;
+    }
+
+    // Forward the location list verbatim — already JSON.
+    String resp = "{\"ok\":true,\"locations\":" + body + "}";
+    http.send(200, "application/json", resp);
 }
 
 static void handleSave() {
@@ -236,12 +380,12 @@ static void handleSave() {
         return;
     }
     if (zip.length() != 5) {
-        http.send(400, "text/plain", "Zip must be 5 digits.");
+        http.send(400, "text/plain", "Pick a location.");
         return;
     }
 
-    if (!tryConnect(ssid.c_str(), password.c_str())) {
-        WiFi.disconnect(false);  // keep AP up
+    if (!tryConnectIfNeeded(ssid.c_str(), password.c_str())) {
+        WiFi.disconnect(false);
         http.send(400, "text/plain",
                   "Couldn't connect to that WiFi. Check SSID & password.");
         return;
@@ -251,7 +395,7 @@ static void handleSave() {
         WiFi.disconnect(false);
         http.send(400, "text/plain",
                   "Connected to WiFi, but couldn't fetch weather for that zip. "
-                  "Check that the zip is registered on the server.");
+                  "The server may be down or the location was just removed.");
         return;
     }
 
@@ -303,6 +447,7 @@ void enterSetupMode() {
 
     http.on("/", handleRoot);
     http.on("/scan", handleScan);
+    http.on("/connect", HTTP_POST, handleConnect);
     http.on("/save", HTTP_POST, handleSave);
     http.onNotFound(handleNotFound);
     http.begin();
@@ -324,4 +469,9 @@ void enterSetupMode() {
     WiFi.softAPdisconnect(true);
     WiFi.disconnect(true);
     WiFi.mode(WIFI_OFF);
+
+    // Repaint plain splash (no QR) so the screen no longer suggests an active
+    // AP. If the caller has NVS config, this'll get overwritten by weather
+    // shortly; if not, plain splash is the correct end state.
+    renderSplash();
 }

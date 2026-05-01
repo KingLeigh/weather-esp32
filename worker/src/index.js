@@ -69,6 +69,15 @@ export default {
       return jsonResponse({ locations, pollInterval });
     }
 
+    // GET /locations — slim public list used by the firmware setup flow.
+    // Captive portal fetches this after the user's WiFi connects, to populate
+    // the location dropdown (so users pick from registered zips, not type).
+    if (url.pathname === '/locations' && request.method === 'GET') {
+      const locations = await getLocations(env);
+      const slim = locations.map((l) => ({ zip: l.zip, label: l.label }));
+      return jsonResponse(slim);
+    }
+
     // Root info page
     if (url.pathname === '/') {
       const locations = await getLocations(env);
