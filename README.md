@@ -34,24 +34,39 @@ All weather UI rendering happens on the server (JSX layout → satori → resvg 
 
 ```
 weather-claude/
-├── firmware-png/        ESP32 firmware: fetch PNG → decode → display
+├── firmware/            ESP32 firmware: captive-portal setup + weather display
+├── firmware-probe/      Disposable: GPIO button identification sketch
 ├── firmware-png-test/   Disposable: embedded PNG decode smoke test
 └── worker/
     ├── src/             Cloudflare Worker (routing, caching, providers, renderer)
     └── renderer/        Shared layout + local preview tooling
 ```
 
-### `firmware-png/` — ESP32 Firmware
+### `firmware/` — ESP32 Firmware
 
-The production firmware. Fetches `/weather.png` from the Worker, decodes with PNGdec, draws battery + staleness overlay, pushes to e-paper, deep sleeps. Uses PNG hash in RTC memory for change detection.
+The production firmware. Fetches `/weather/{zip}.png` from the Worker for the
+device's configured location, decodes with PNGdec, draws battery + staleness
+overlay, pushes to e-paper, deep sleeps. Uses PNG hash in RTC memory for
+change detection.
+
+WiFi credentials and zip code live in NVS (the ESP32's non-volatile flash
+partition), populated through a self-serve captive-portal flow on first boot
+and any time the user long-presses the IO21 button. See
+[`firmware/README.md`](firmware/README.md) (if present) or just read
+`firmware/src/main.cpp` for the full state machine.
 
 ### `worker/` — Cloudflare Worker
 
-Server-side weather API + PNG rendering pipeline. See [`worker/README.md`](worker/README.md) for full documentation including setup-from-scratch instructions.
+Server-side weather API + PNG rendering pipeline. See
+[`worker/README.md`](worker/README.md) for full documentation including
+setup-from-scratch instructions.
 
-### `firmware-png-test/` — Smoke Test (Disposable)
+### `firmware-probe/` & `firmware-png-test/` — Disposable
 
-Minimal firmware that decodes an embedded PNG (no WiFi). Used to verify PNGdec + e-paper pipeline. Can be deleted once no longer needed.
+Minimal one-off sketches for hardware bring-up. `firmware-probe/` identifies
+which GPIO each physical button is wired to; `firmware-png-test/` verifies the
+PNGdec + e-paper pipeline with an embedded PNG. Safe to delete once no longer
+useful.
 
 ## Getting Started
 
@@ -74,22 +89,40 @@ npm run deploy
 
 ### ESP32 Setup
 
-1. Create WiFi config:
+1. Build and flash:
    ```bash
-   # Edit firmware-png/include/wifi_config.h with your WiFi credentials
-   # (see template comments in the file)
-   ```
-
-2. Build and flash:
-   ```bash
-   cd firmware-png
+   cd firmware
    pio run -t upload
    ```
 
-3. Monitor serial output:
+2. Monitor serial output:
    ```bash
    pio device monitor --baud 115200
    ```
+
+3. Configure WiFi + location through the device:
+   - On first boot the screen shows a "Setup required" splash with
+     instructions and a placeholder for a QR code.
+   - **Long-press IO21** for ~1.5 seconds. The device wakes into setup
+     mode: a WiFi access point named `WhatsTheWeather-XXXX` (last 4 of
+     the device's MAC) starts broadcasting, and a real WiFi-join QR
+     overdraws the placeholder.
+   - **Scan the QR with your phone's camera** to auto-join the AP.
+     iOS/Android pop a captive portal automatically.
+   - Pick your home WiFi, enter the password, hit **Connect**. The device
+     verifies the WiFi works, then fetches the registered location list
+     from the Worker.
+   - Pick a location from the dropdown, hit **Save**. The device verifies
+     it can fetch weather for that zip, writes to NVS, and reboots into
+     normal operation.
+   - Locations come from the Worker's `/locations` endpoint, populated
+     by the admin page at `/admin`. Add a zip there before flashing
+     (or any time after — the device's setup form will see new entries
+     on next setup).
+
+   To re-configure later (change WiFi or location), long-press IO21 at
+   any time. To wipe all settings before gifting the device, hit the
+   **Factory reset** link at the bottom of the captive-portal form.
 
 ### Local Layout Preview
 

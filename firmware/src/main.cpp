@@ -504,7 +504,7 @@ void setup() {
     bool firstBoot = (boot_count == 1);
     esp_sleep_wakeup_cause_t wakeup = esp_sleep_get_wakeup_cause();
 
-    Serial.printf("\n=== firmware-selfserve  boot #%u  wakeup=%d ===\n",
+    Serial.printf("\n=== firmware  boot #%u  wakeup=%d ===\n",
                   boot_count, (int)wakeup);
 
     // ── Button wake handling ─────────────────────────────────────────────

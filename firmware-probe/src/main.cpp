@@ -3,7 +3,7 @@
 //
 // Flash, open serial monitor, press each physical button one at a time, and
 // note which GPIO logs "PRESSED". After identifying buttons, re-flash the
-// real firmware (firmware-png/) to restore normal operation.
+// real firmware (firmware/) to restore normal operation.
 //
 // Pins are configured INPUT_PULLUP, so a button press = pin pulled to GND.
 
