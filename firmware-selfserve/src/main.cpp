@@ -1,12 +1,13 @@
 // Self-serve PNG-fetching firmware for the LilyGo T5 4.7" S3 E-Paper.
 //
-// Reads WiFi credentials and a zip code from NVS (populated by setup mode —
-// see future setup_mode.cpp), fetches a pre-rendered 960×540 grayscale PNG
-// from the Cloudflare Worker for that zip, decodes it with PNGdec, composites
-// a battery + staleness overlay, and pushes to the e-paper. Then deep sleeps.
+// Three boot paths, picked from wakeup cause + NVS state:
+//   - Long-press IO21 → render splash + enterSetupMode() (AP + captive portal)
+//   - No NVS config → render splash, deep sleep until button (no timer wake)
+//   - Has NVS config → fetch the per-zip PNG from the worker, display weather
 //
-// If NVS has no config yet, displays the bundled splash and deep sleeps —
-// future setup-mode firmware will trigger the captive portal from this state.
+// Setup-mode entry from the captive portal (see setup_mode.cpp) writes ssid,
+// password, and zip into NVS via saveConfig() and esp_restart()s; the next
+// boot lands in the weather flow.
 //
 // Change detection: a simple hash of the PNG bytes is persisted in RTC memory
 // across deep sleep cycles. If the hash, battery level, and staleness display
@@ -28,15 +29,14 @@
 
 #include "config.h"
 #include "splash_png.h"
+#include "setup_mode.h"
 
 // ─── constants ───────────────────────────────────────────────────────────────
 
 #define SLEEP_MINUTES        5
 #define SLEEP_US             ((uint64_t)SLEEP_MINUTES * 60 * 1000000ULL)
 
-// Worker base URL — the per-zip PNG lives at SERVER_BASE_URL/weather/{zip}.png.
-// Same worker for every device, so we bake it in.
-static const char *SERVER_BASE_URL = "https://weather-esp32.leigh-herbert.workers.dev";
+// SERVER_BASE_URL lives in config.h (used by both main + setup_mode).
 
 // WiFi connect timeout — give up if STA association doesn't complete in this
 // window, count the wake as a failure, and deep sleep.
@@ -407,7 +407,10 @@ static void renderSplash() {
 
 // ─── deep sleep ──────────────────────────────────────────────────────────────
 
-static void enterDeepSleep() {
+// armTimer=false: only the button wakes the chip (used in the no-config state
+// where there's nothing useful to retry on a periodic timer). armTimer=true:
+// both timer + button (normal weather operation).
+static void enterDeepSleep(bool armTimer = true) {
 #ifdef KEEP_AWAKE
     // Debug build: skip real deep sleep so USB CDC stays alive across "wakes".
     // Soft-restart after a short delay to simulate the wake cycle quickly.
@@ -419,8 +422,13 @@ static void enterDeepSleep() {
     return;
 #endif
 
-    Serial.printf("Sleeping for %d minutes (or until button press on IO%d)...\n",
-                  SLEEP_MINUTES, (int)BUTTON_GPIO);
+    if (armTimer) {
+        Serial.printf("Sleeping for %d min (or button on IO%d)...\n",
+                      SLEEP_MINUTES, (int)BUTTON_GPIO);
+    } else {
+        Serial.printf("Sleeping until button on IO%d (no timer wake)...\n",
+                      (int)BUTTON_GPIO);
+    }
     Serial.flush();
 
     // Configure the button GPIO as an RTC input with internal pull-up so ext0
@@ -429,7 +437,9 @@ static void enterDeepSleep() {
     rtc_gpio_pulldown_dis(BUTTON_GPIO);
 
     esp_sleep_enable_ext0_wakeup(BUTTON_GPIO, 0);  // wake when button pulled LOW
-    esp_sleep_enable_timer_wakeup(SLEEP_US);
+    if (armTimer) {
+        esp_sleep_enable_timer_wakeup(SLEEP_US);
+    }
     esp_deep_sleep_start();
     // Never reaches here.
 }
@@ -450,9 +460,9 @@ void setup() {
     // ── Button wake handling ─────────────────────────────────────────────
     // If the button woke us, require a long hold before doing anything — a
     // brief tap is treated as accidental and we go straight back to sleep
-    // (no EPD spin-up, no WiFi). A confirmed long press will (in phase 5)
-    // enter setup mode; for now we just log and continue normal flow, with
-    // the splash forced to redraw as visual feedback.
+    // (no EPD spin-up, no WiFi). A confirmed long press flips wantSetup so
+    // the post-config branch enters setup mode after the splash refreshes.
+    bool wantSetup = false;
     if (wakeup == ESP_SLEEP_WAKEUP_EXT0) {
         Serial.println("Wakeup: button on IO21");
         pinMode(BUTTON_GPIO, INPUT_PULLUP);
@@ -466,9 +476,8 @@ void setup() {
             }
             delay(20);
         }
-        Serial.println("Long press confirmed (>1.5s) — would enter SETUP mode (phase 5).");
-        // Force splash redraw so the user gets visible feedback their press worked.
-        splash_already_drawn = false;
+        Serial.println("Long press confirmed (>1.5s) — entering setup mode after splash.");
+        wantSetup = true;
     }
 
     // Init display + framebuffer.
@@ -490,18 +499,42 @@ void setup() {
 
     // ── Load config from NVS ─────────────────────────────────────────────
     DeviceConfig cfg;
-    if (!loadConfig(cfg)) {
+    bool hasConfig = loadConfig(cfg);
+    if (hasConfig) {
+        Serial.printf("Config: SSID='%s' zip='%s'\n",
+                      cfg.ssid.c_str(), cfg.zip.c_str());
+    } else {
         Serial.println("No NVS config — device not yet set up.");
-        if (!splash_already_drawn) {
+    }
+
+    // ── Setup-mode / no-config path ──────────────────────────────────────
+    // Entered when the user long-pressed the button (wantSetup) OR when there
+    // is no NVS config (in which case we just show the splash and wait for
+    // the user to actually press the button to enter setup).
+    if (wantSetup || !hasConfig) {
+        // Force a splash redraw on long-press for visual feedback that the
+        // button registered. Otherwise honor splash_already_drawn so we don't
+        // re-flash the panel on every wake while idle on the splash screen.
+        if (wantSetup || !splash_already_drawn) {
             renderSplash();
             splash_already_drawn = true;
         } else {
             Serial.println("Splash already drawn — skipping refresh.");
         }
-        enterDeepSleep();
+
+        if (wantSetup) {
+            // Returns on idle timeout. esp_restart()s on successful save.
+            enterSetupMode();
+        }
+
+        // No useful periodic work in this state — only the button can rescue
+        // us if we have no config. With config (rare: setup mode timed out
+        // without saving), keep the timer wake so weather retries normally.
+        enterDeepSleep(/*armTimer=*/hasConfig);
         return;
     }
-    Serial.printf("Config: SSID='%s' zip='%s'\n", cfg.ssid.c_str(), cfg.zip.c_str());
+
+    // ── Normal weather flow (have config, not entering setup) ────────────
     // Reset the splash-drawn flag so a future drop back to no-config (e.g.
     // after factory reset in setup mode) triggers a fresh splash render.
     splash_already_drawn = false;

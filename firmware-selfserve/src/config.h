@@ -11,6 +11,12 @@
 
 #include <Arduino.h>
 
+// Worker base URL — the per-zip PNG lives at SERVER_BASE_URL/weather/{zip}.png.
+// Same worker for every device, so we bake it in. Used by both the normal
+// fetch path (main.cpp) and the captive-portal verify path (setup_mode.cpp).
+inline constexpr const char *SERVER_BASE_URL =
+    "https://weather-esp32.leigh-herbert.workers.dev";
+
 struct DeviceConfig {
     String ssid;
     String password;  // empty for open networks
