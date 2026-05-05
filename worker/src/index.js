@@ -50,6 +50,26 @@ export default {
       return serveWeatherPng(env, loc);
     }
 
+    // GET /weather/{zip}.json — debug: returns the transformed weather data
+    // the renderer would be given. Always live-fetched (no cache) so we see
+    // the freshest provider output. Useful for diagnosing icon vs hourly
+    // mismatches and other "what is the data actually saying" questions.
+    const zipJsonMatch = url.pathname.match(/^\/weather\/(\d+)\.json$/);
+    if (zipJsonMatch) {
+      const zip = zipJsonMatch[1];
+      const locations = await getLocations(env);
+      const loc = locations.find((l) => l.zip === zip);
+      if (!loc) {
+        return new Response(`Unknown zip code: ${zip}`, { status: 404 });
+      }
+      try {
+        const weatherData = await fetchWeatherData(env, `${loc.lat},${loc.lon}`);
+        return jsonResponse(weatherData);
+      } catch (error) {
+        return new Response(`Fetch failed: ${error.message}`, { status: 500 });
+      }
+    }
+
     // GET /admin — admin page
     if (url.pathname === '/admin' && request.method === 'GET') {
       return new Response(adminPageHtml(), {
