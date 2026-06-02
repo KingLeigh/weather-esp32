@@ -377,7 +377,11 @@ const AXIS_LABEL_W = 50;
 
 function AxisLabels({ chartW, updated, n }) {
   const nowHour = parseLocalHour(updated);
-  const axisLabels = computeAxisLabels(nowHour, chartW, n);
+  // Drop a label that lands exactly on the last hour (x === chartW): centered
+  // there it overruns the right edge and collides with the firmware-drawn
+  // battery overlay in the bottom-right. The gridline itself still renders.
+  const axisLabels = computeAxisLabels(nowHour, chartW, n)
+    .filter(({ slot }) => slot !== n - 1);
 
   return (
     <div
@@ -729,8 +733,12 @@ function ForecastChart({ data, hasRain, hasSnow }) {
         </svg>
         {/* Temperature labels at each 3-hour gridline. Each sits on the
             curve's vertex for that hour (shared x-mapping), placed above or
-            below the line per the midY rule so it never clips an edge. */}
-        {computeAxisLabels(nowH, chartW, n).map(({ slot, x }) => {
+            below the line per the midY rule so it never clips an edge. A label
+            on the last hour (slot n-1, x === chartW) is skipped — it would
+            overrun the right edge / firmware battery overlay. */}
+        {computeAxisLabels(nowH, chartW, n)
+          .filter(({ slot }) => slot !== n - 1)
+          .map(({ slot, x }) => {
           const t = hourly_temp[slot];
           const y = yForTemp(t);
           const below = y <= midY; // upper half (hotter) → label below curve
