@@ -324,6 +324,16 @@ function parseLocalHour(updated) {
   return m ? parseInt(m[1], 10) : 0;
 }
 
+// Format minutes-since-local-midnight as a compact marker label.
+// 405 → "6:45a", 1168 → "7:28p".
+function formatClockLabel(min) {
+  const h24 = Math.floor(min / 60);
+  const m = min % 60;
+  const suffix = h24 >= 12 ? 'p' : 'a';
+  const h = h24 % 12 === 0 ? 12 : h24 % 12;
+  return `${h}:${String(m).padStart(2, '0')}${suffix}`;
+}
+
 // Compute chart x positions and labels for every 3-hour clock boundary
 // (00, 03, 06, 09, 12, 15, 18, 21) in the window starting at nowHour.
 //
@@ -404,6 +414,10 @@ function AxisLabels({ chartW, updated, n }) {
 
 const GRIDLINE_MAJOR = '#888';  // midnight, noon — one shade darker
 const GRIDLINE_MINOR = '#999';  // every other 3-hour mark + horizontals
+
+// Sunrise/sunset markers: dotted vertical lines, solid black so they stay
+// distinct from the grey hour gridlines and render cleanly on the 4bpp panel.
+const SUN_MARK_DASH = '2 6';
 
 function chartGridlines(chartW, chartH, updated, n, yTop, yBottom) {
   // yTop / yBottom define the drawable region within the chart; gridlines
@@ -584,6 +598,22 @@ function ForecastChart({ data, hasRain, hasSnow }) {
     }
   }
 
+  // ── Sunrise/sunset markers ─────────────────────────────────────────
+  // The provider gives local clock times as minutes since midnight. Map
+  // each to an hour offset from nowH (the same reference the gridlines
+  // use) and then to an x via the shared slot/(n-1) mapping, so the dotted
+  // markers align with the grid. Times not in the data are skipped.
+  const sun = data.sun || {};
+  const sunMarks = [
+    { key: 'sunrise', min: sun.sunrise_min },
+    { key: 'sunset', min: sun.sunset_min },
+  ]
+    .filter((m) => Number.isFinite(m.min))
+    .map((m) => {
+      const offset = (((m.min / 60 - nowH) % 24) + 24) % 24;
+      return { key: m.key, x: (offset / (n - 1)) * chartW, label: formatClockLabel(m.min) };
+    });
+
   return (
     <div
       style={{
@@ -676,6 +706,19 @@ function ForecastChart({ data, hasRain, hasSnow }) {
               />
             )
           ))}
+          {/* Sunrise/sunset dotted markers (behind the temp line) */}
+          {sunMarks.map(({ key, x }) => (
+            <line
+              key={`sun-${key}`}
+              x1={x}
+              y1={inset}
+              x2={x}
+              y2={inset + usableH}
+              stroke={FG}
+              strokeWidth={2}
+              strokeDasharray={SUN_MARK_DASH}
+            />
+          ))}
           {/* Temperature line (on top of everything) */}
           <polyline
             points={lineStr}
@@ -710,6 +753,25 @@ function ForecastChart({ data, hasRain, hasSnow }) {
             </div>
           );
         })}
+        {/* Sunrise/sunset time labels, in the gap above their marker lines. */}
+        {sunMarks.map(({ key, x, label }) => (
+          <div
+            key={`sun-lbl-${key}`}
+            style={{
+              position: 'absolute',
+              left: x - 40,
+              top: -26,
+              width: 80,
+              fontSize: 18,
+              fontWeight: 700,
+              color: FG,
+              display: 'flex',
+              justifyContent: 'center',
+            }}
+          >
+            {label}
+          </div>
+        ))}
       </div>
 
       <AxisLabels chartW={chartW} updated={updated} n={n} />
