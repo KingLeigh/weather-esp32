@@ -324,31 +324,35 @@ function parseLocalHour(updated) {
   return m ? parseInt(m[1], 10) : 0;
 }
 
-// Compute chart x positions and labels for every 6-hour clock boundary
-// (00:00, 06:00, 12:00, 18:00) in the 24-hour window starting at nowHour.
-// Each hour occupies exactly chartW/24 pixels.
-function computeAxisLabels(nowHour, chartW) {
-  const slotW = chartW / 24;
+// Compute chart x positions and labels for every 3-hour clock boundary
+// (00, 03, 06, 09, 12, 15, 18, 21) in the window starting at nowHour.
+//
+// `n` is the number of hourly data points. Positions use the same
+// `slot / (n - 1)` mapping as the temperature line (see ForecastChart), so
+// gridlines, axis labels, and the per-gridline temperature labels all share
+// an x for a given hour offset — a label drawn at `slot` lands exactly on the
+// line's vertex at `slot`. Each returned entry carries its `slot` (the hour
+// offset, which doubles as the index into hourly_temp).
+function computeAxisLabels(nowHour, chartW, n) {
+  const slotW = chartW / (n - 1);
 
   const labelForHour = (h) => {
     const hh = ((h % 24) + 24) % 24;
     if (hh === 0) return '00';
-    if (hh === 6) return '6a';
     if (hh === 12) return '12';
-    if (hh === 18) return '6p';
-    return hh < 12 ? `${hh}a` : `${hh - 12}p`;
+    return String(hh < 12 ? hh : hh - 12);
   };
 
   const out = [];
-  // First 6-hour boundary strictly after nowHour.
-  let h = Math.floor(nowHour / 6) * 6 + 6;
-  while (h < nowHour + 24) {
+  // First 3-hour boundary strictly after nowHour.
+  let h = Math.floor(nowHour / 3) * 3 + 3;
+  while (h < nowHour + n) {
     const slot = h - nowHour;
     const x = slot * slotW;
     const hh = h % 24;
     const isMajor = hh === 0 || hh === 12;
-    out.push({ x, label: labelForHour(hh), isMajor });
-    h += 6;
+    out.push({ x, slot, label: labelForHour(hh), isMajor });
+    h += 3;
   }
   return out;
 }
@@ -361,9 +365,9 @@ const AXIS_LABEL_W = 50;
 
 // ─── shared axis labels (used by both chart types) ──────────────────────────
 
-function AxisLabels({ chartW, updated }) {
+function AxisLabels({ chartW, updated, n }) {
   const nowHour = parseLocalHour(updated);
-  const axisLabels = computeAxisLabels(nowHour, chartW);
+  const axisLabels = computeAxisLabels(nowHour, chartW, n);
 
   return (
     <div
@@ -375,9 +379,9 @@ function AxisLabels({ chartW, updated }) {
         marginTop: 8,
       }}
     >
-      {axisLabels.map(({ x, label: lbl }) => (
+      {axisLabels.map(({ x, slot, label: lbl }) => (
         <div
-          key={lbl}
+          key={slot}
           style={{
             position: 'absolute',
             left: x - AXIS_LABEL_W / 2,
@@ -396,19 +400,19 @@ function AxisLabels({ chartW, updated }) {
   );
 }
 
-// ─── shared chart gridlines (vertical lines at 6-hour boundaries) ───────────
+// ─── shared chart gridlines (vertical lines at 3-hour boundaries) ───────────
 
 const GRIDLINE_MAJOR = '#888';  // midnight, noon — one shade darker
-const GRIDLINE_MINOR = '#999';  // everything else (6am/6pm, horizontals)
+const GRIDLINE_MINOR = '#999';  // every other 3-hour mark + horizontals
 
-function chartGridlines(chartW, chartH, updated, yTop, yBottom) {
+function chartGridlines(chartW, chartH, updated, n, yTop, yBottom) {
   // yTop / yBottom define the drawable region within the chart; gridlines
   // are clipped to this range so they intersect cleanly with horizontal
   // reference lines. Defaults to full chart height if not provided.
   const y1 = yTop ?? 0;
   const y2 = yBottom ?? chartH - 4;
   const nowHour = parseLocalHour(updated);
-  const labels = computeAxisLabels(nowHour, chartW);
+  const labels = computeAxisLabels(nowHour, chartW, n);
 
   return labels.map(({ x, isMajor }, i) => (
     <line
@@ -466,36 +470,12 @@ function ForecastChart({ data, hasRain, hasSnow }) {
     return { x: i * barW, y: inset + usableH - barH, w: barW, h: barH };
   }) : [];
 
-  // ── High/low label positioning ────────────────────────────────────
-  const findRunCenter = (arr, value) => {
-    let bestStart = 0, bestLen = 0;
-    let start = -1, len = 0;
-    for (let i = 0; i < arr.length; i++) {
-      if (arr[i] === value) {
-        if (start === -1) start = i;
-        len++;
-        if (len > bestLen) { bestStart = start; bestLen = len; }
-      } else {
-        start = -1; len = 0;
-      }
-    }
-    return bestStart + (bestLen - 1) / 2;
-  };
-
-  const highCenter = findRunCenter(hourly_temp, maxTemp);
-  const lowCenter = findRunCenter(hourly_temp, minTemp);
-
-  const xForIdx = (idx) => {
-    if (n === 1) return 0;
-    return (idx / (n - 1)) * chartW;
-  };
-  const yForIdx = (idx) => {
-    const floor = Math.floor(idx);
-    const ceil = Math.min(floor + 1, n - 1);
-    const frac = idx - floor;
-    const t = hourly_temp[floor] * (1 - frac) + hourly_temp[ceil] * frac;
-    return yForTemp(t);
-  };
+  // ── Temperature label placement ────────────────────────────────────
+  // Vertical midpoint of the plotted region. A point above this line
+  // (hotter — smaller y) gets its label *below* the curve; a point below
+  // it gets the label *above*. This keeps every label clear of the chart's
+  // top and bottom edges regardless of where the curve sits.
+  const midY = inset + usableH / 2;
 
   // ── Title + summary ───────────────────────────────────────────────
   const hasPrecip = hasRain || hasSnow;
@@ -647,7 +627,7 @@ function ForecastChart({ data, hasRain, hasSnow }) {
         }}
       >
         <svg width={chartW} height={chartH} style={{ position: 'absolute', left: 0, top: 0 }}>
-          {chartGridlines(chartW, chartH, updated, inset, inset + usableH)}
+          {chartGridlines(chartW, chartH, updated, n, inset, inset + usableH)}
           {/* Horizontal reference lines at each temp step */}
           {(() => {
             const lines = [];
@@ -704,41 +684,35 @@ function ForecastChart({ data, hasRain, hasSnow }) {
             fill="none"
           />
         </svg>
-        {/* High temp label — below the peak */}
-        <div
-          style={{
-            position: 'absolute',
-            left: xForIdx(highCenter) - 30,
-            top: yForIdx(highCenter) + 12,
-            width: 60,
-            fontSize: 20,
-            fontWeight: 700,
-            color: FG,
-            display: 'flex',
-            justifyContent: 'center',
-          }}
-        >
-          {`${maxTemp}°`}
-        </div>
-        {/* Low temp label — above the trough */}
-        <div
-          style={{
-            position: 'absolute',
-            left: xForIdx(lowCenter) - 30,
-            top: yForIdx(lowCenter) - 32,
-            width: 60,
-            fontSize: 20,
-            fontWeight: 700,
-            color: FG_MUTED,
-            display: 'flex',
-            justifyContent: 'center',
-          }}
-        >
-          {`${minTemp}°`}
-        </div>
+        {/* Temperature labels at each 3-hour gridline. Each sits on the
+            curve's vertex for that hour (shared x-mapping), placed above or
+            below the line per the midY rule so it never clips an edge. */}
+        {computeAxisLabels(nowH, chartW, n).map(({ slot, x }) => {
+          const t = hourly_temp[slot];
+          const y = yForTemp(t);
+          const below = y <= midY; // upper half (hotter) → label below curve
+          return (
+            <div
+              key={`tl${slot}`}
+              style={{
+                position: 'absolute',
+                left: x - 30,
+                top: below ? y + 12 : y - 32,
+                width: 60,
+                fontSize: 20,
+                fontWeight: 700,
+                color: FG,
+                display: 'flex',
+                justifyContent: 'center',
+              }}
+            >
+              {String(t)}
+            </div>
+          );
+        })}
       </div>
 
-      <AxisLabels chartW={chartW} updated={updated} />
+      <AxisLabels chartW={chartW} updated={updated} n={n} />
     </div>
   );
 }
