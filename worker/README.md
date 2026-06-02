@@ -84,7 +84,7 @@ The provider outputs this structure, consumed by `layout.jsx`:
   "rain_mm": 0.8,
   "snow_mm": 0,
   "uv": { "current": 6, "high": 9 },
-  "sun": { "sunrise": "06:45 AM", "sunset": "07:28 PM" },
+  "sun": { "sunrise": "06:45 AM", "sunset": "07:28 PM", "sunrise_min": 405, "sunset_min": 1168 },
   "moon": { "illumination": 68, "phase": "Waxing Gibbous" },
   "wind": { "mph": 12, "dir": "NW" },
   "is_day": true,
@@ -95,6 +95,7 @@ The provider outputs this structure, consumed by `layout.jsx`:
 - `weather` — One of: `sunny`, `cloudy`, `partly_cloudy`, `rainy`, `snowy`, `thunderstorm`, `fog`
 - `rain_chance`, `snow_chance` — 24 hourly probability values (0–100)
 - `hourly_temp` — 24 hourly temperatures (°F)
+- `sun.sunrise` / `sun.sunset` — display strings; `sun.sunrise_min` / `sun.sunset_min` are the same times as minutes since local midnight (used to position the chart's sunrise/sunset marker lines)
 - `updated` — ISO 8601 timestamp in Eastern Time (no timezone suffix)
 
 ## Setup from scratch

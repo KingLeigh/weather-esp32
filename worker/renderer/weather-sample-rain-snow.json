@@ -63,7 +63,9 @@
   },
   "sun": {
     "sunrise": "06:45 AM",
-    "sunset": "07:28 PM"
+    "sunset": "07:28 PM",
+    "sunrise_min": 405,
+    "sunset_min": 1168
   },
   "moon": {
     "illumination": 68,

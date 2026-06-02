@@ -77,9 +77,12 @@ export class OpenWeatherMapProvider extends WeatherProvider {
     const uvCurrent = Math.round(current.uvi || 0);
     const uvHigh = Math.round(daily.uvi || 0);
 
-    // Sunrise/sunset - convert unix timestamps to formatted time
+    // Sunrise/sunset — formatted strings for display, plus minutes since
+    // local midnight (used by the chart to position marker lines).
     const sunrise = this._formatTime(daily.sunrise, data.timezone_offset);
     const sunset = this._formatTime(daily.sunset, data.timezone_offset);
+    const sunriseMin = this._localMinutes(daily.sunrise, data.timezone_offset);
+    const sunsetMin = this._localMinutes(daily.sunset, data.timezone_offset);
 
     // Moon phase: OWM returns 0-1 float, map to phase name
     const moonPhase = this._mapMoonPhase(daily.moon_phase);
@@ -106,7 +109,9 @@ export class OpenWeatherMapProvider extends WeatherProvider {
       },
       sun: {
         sunrise: sunrise,
-        sunset: sunset
+        sunset: sunset,
+        sunrise_min: sunriseMin,
+        sunset_min: sunsetMin
       },
       moon: {
         illumination: this._estimateIllumination(daily.moon_phase),
@@ -132,13 +137,22 @@ export class OpenWeatherMapProvider extends WeatherProvider {
   }
 
   /**
-   * Format unix timestamp to "HH:MM AM/PM" using the location's timezone offset
+   * Minutes since local midnight for a unix timestamp, adjusted by the
+   * location's timezone offset. Shared by _formatTime and the numeric sun
+   * fields so the display string and chart position never disagree.
+   */
+  _localMinutes(unixTimestamp, timezoneOffset) {
+    const date = new Date((unixTimestamp + timezoneOffset) * 1000);
+    return date.getUTCHours() * 60 + date.getUTCMinutes();
+  }
+
+  /**
+   * Format unix timestamp to "H:MM AM/PM" using the location's timezone offset
    */
   _formatTime(unixTimestamp, timezoneOffset) {
-    // Create date adjusted for timezone offset
-    const date = new Date((unixTimestamp + timezoneOffset) * 1000);
-    let hours = date.getUTCHours();
-    const minutes = date.getUTCMinutes().toString().padStart(2, '0');
+    const total = this._localMinutes(unixTimestamp, timezoneOffset);
+    let hours = Math.floor(total / 60);
+    const minutes = (total % 60).toString().padStart(2, '0');
     const ampm = hours >= 12 ? 'PM' : 'AM';
     hours = hours % 12;
     if (hours === 0) hours = 12;
