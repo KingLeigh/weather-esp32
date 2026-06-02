@@ -657,7 +657,6 @@ function ForecastChart({ data, hasRain, hasSnow }) {
           position: 'relative',
           width: chartW,
           height: chartH,
-          borderBottom: `2px solid ${BORDER}`,
         }}
       >
         <svg width={chartW} height={chartH} style={{ position: 'absolute', left: 0, top: 0 }}>
@@ -729,6 +728,18 @@ function ForecastChart({ data, hasRain, hasSnow }) {
             stroke={FG}
             strokeWidth={strokeW}
             fill="none"
+          />
+          {/* X-axis baseline — a crisp SVG line rather than a CSS border so
+              its ends don't anti-alias into a stray pixel at the right edge
+              (same crispEdges technique as the gridlines). */}
+          <line
+            x1={0}
+            y1={chartH - 1}
+            x2={chartW + 1}
+            y2={chartH - 1}
+            stroke={BORDER}
+            strokeWidth={2}
+            shapeRendering="crispEdges"
           />
         </svg>
         {/* Temperature labels at each 3-hour gridline. Each sits on the
