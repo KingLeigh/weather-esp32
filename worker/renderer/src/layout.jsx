@@ -226,7 +226,7 @@ function Hero({ data }) {
         display: 'flex',
         flexDirection: 'row',
         alignItems: 'flex-start',
-        padding: `32px ${PAGE_PADDING_X}px 20px ${PAGE_PADDING_X}px`,
+        padding: `32px ${PAGE_PADDING_X}px 6px ${PAGE_PADDING_X}px`,
       }}
     >
       {/* Left: weather icon */}
@@ -602,7 +602,7 @@ function ForecastChart({ data, hasRain, hasSnow }) {
           alignItems: 'center',
           color: FG_MUTED,
           height: 50,
-          marginBottom: 18,
+          marginBottom: 32,
         }}
       >
         <div
