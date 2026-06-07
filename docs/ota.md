@@ -18,19 +18,18 @@ slow.
 
 ## How it's stored
 
-Cloudflare KV (binding `WEATHER_KV`):
+Everything lives in Cloudflare KV (binding `WEATHER_KV`):
 
 | Key | Value |
 | --- | --- |
 | `firmware:channel:fast` | version number as a string, e.g. `"3"` |
 | `firmware:channel:slow` | version number as a string |
 | `firmware:fast_devices` | JSON array of device-id strings, e.g. `["a1b2c3d4e5f6"]` |
+| `firmware:bin:{version}` | the firmware binary (~1.1 MB) for that integer version |
 
-Cloudflare R2 (bucket `weather-esp32-firmware`):
-
-| Object key | Contents |
-| --- | --- |
-| `firmware/{version}.bin` | the firmware binary for that integer version |
+> **Interim storage note:** the binary is kept in KV for now (it fits KV's 25 MB
+> per-value limit). The intended long-term home is a dedicated R2 bucket,
+> deferred until R2 is enabled on the account — see `ROADMAP.md`.
 
 The single source of truth for the version number is
 `firmware/src/config.h`:
@@ -52,14 +51,7 @@ Do these once, before gifting any device.
    npx wrangler login
    ```
 
-2. **Create the R2 bucket** that holds the binaries:
-
-   ```sh
-   cd worker
-   npx wrangler r2 bucket create weather-esp32-firmware
-   ```
-
-3. **Flash the first OTA-capable build over USB.** The firmware currently on a
+2. **Flash the first OTA-capable build over USB.** The firmware currently on a
    device has no OTA codepath, so the very first build that *can* self-update
    must be installed once over the wire:
 
@@ -80,7 +72,7 @@ For each new release:
    `FIRMWARE_VERSION`.
 
 2. **Publish to the fast channel.** This builds (with `--build`), uploads the
-   binary to R2 as `firmware/{version}.bin`, and points
+   binary to KV as `firmware:bin:{version}`, and points
    `firmware:channel:fast` at the new version:
 
    ```sh
@@ -144,9 +136,8 @@ ota-publish.sh [--channel fast|slow] [--build] [--version N] [--dry-run]
 - `--dry-run` — print the resolved version and the exact wrangler commands
   without running them.
 
-Uploads `firmware/.pio/build/firmware/firmware.bin` to
-`weather-esp32-firmware/firmware/{version}.bin` and sets
-`firmware:channel:{channel}` to the version.
+Uploads `firmware/.pio/build/firmware/firmware.bin` to KV as
+`firmware:bin:{version}` and sets `firmware:channel:{channel}` to the version.
 
 ### `ota-promote.sh`
 

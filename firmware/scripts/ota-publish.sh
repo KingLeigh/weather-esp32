@@ -1,9 +1,10 @@
 #!/bin/bash
 # Publish a firmware build to an OTA release channel.
 #
-# Uploads firmware/.pio/build/firmware/firmware.bin to R2 under
-# firmware/{version}.bin and points the chosen channel KV key at that version.
+# Uploads firmware/.pio/build/firmware/firmware.bin to KV under
+# firmware:bin:{version} and points the chosen channel KV key at that version.
 # Devices poll their channel (fast or slow, resolved by chip ID) and self-update.
+# (Binary stored in KV in the interim; migrate to R2 later — see ROADMAP.md.)
 #
 # Usage:
 #   ota-publish.sh [--channel fast|slow] [--build] [--version N] [--dry-run]
@@ -25,7 +26,6 @@ FIRMWARE_DIR="${SCRIPT_DIR}/.."
 WORKER_DIR="${FIRMWARE_DIR}/../worker"
 CONFIG_H="${FIRMWARE_DIR}/src/config.h"
 FIRMWARE_BIN="${FIRMWARE_DIR}/.pio/build/firmware/firmware.bin"
-BUCKET="weather-esp32-firmware"
 
 CHANNEL="fast"
 DO_BUILD=0
@@ -84,7 +84,7 @@ if ! printf '%s' "$VERSION" | grep -qE '^[0-9]+$'; then
     exit 1
 fi
 
-R2_CMD="npx wrangler r2 object put ${BUCKET}/firmware/${VERSION}.bin --file=../firmware/.pio/build/firmware/firmware.bin"
+BIN_CMD="npx wrangler kv key put --binding=WEATHER_KV \"firmware:bin:${VERSION}\" --path=../firmware/.pio/build/firmware/firmware.bin"
 KV_CMD="npx wrangler kv key put --binding=WEATHER_KV \"firmware:channel:${CHANNEL}\" \"${VERSION}\""
 
 if [ "$DRY_RUN" -eq 1 ]; then
@@ -93,7 +93,7 @@ if [ "$DRY_RUN" -eq 1 ]; then
     if [ "$DO_BUILD" -eq 1 ]; then
         echo "[dry-run] would build: export PATH=\"\$HOME/Library/Python/3.9/bin:\$PATH\" && pio run -e firmware"
     fi
-    echo "[dry-run] (cd worker) ${R2_CMD}"
+    echo "[dry-run] (cd worker) ${BIN_CMD}"
     echo "[dry-run] (cd worker) ${KV_CMD}"
     exit 0
 fi
@@ -112,8 +112,8 @@ fi
 
 cd "$WORKER_DIR"
 
-echo "Uploading firmware ${VERSION}.bin to R2 bucket ${BUCKET}..."
-eval "$R2_CMD"
+echo "Uploading firmware v${VERSION} to KV (firmware:bin:${VERSION})..."
+eval "$BIN_CMD"
 
 echo "Pointing channel '${CHANNEL}' at version ${VERSION}..."
 eval "$KV_CMD"
