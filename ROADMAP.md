@@ -53,6 +53,13 @@ device can be updated without physical access.
   4. **Release workflow** — build `.bin`, upload, bump the version.
   5. **Harden for unattended devices** — rollback protection, battery guard, TLS cert
      validation on the OTA path, optionally signed images.
+- **TODO — migrate binary storage from KV to R2.** The binary is currently stored in
+  Cloudflare KV (`firmware:bin:{version}`, ~1.1 MB, within KV's 25 MB/value limit) as an
+  interim measure because R2 wasn't enabled on the account. Move it to a dedicated R2
+  bucket (`weather-esp32-firmware`) once R2 is available — purpose-built for blobs,
+  strong consistency, easier to list/manage versions. The device-facing
+  `/firmware/{version}.bin` URL stays the same, so only the worker's read and the
+  `ota-publish.sh` upload change.
 
 ### Self-serve splash on unconfigured / offline boot
 The splash PNG is rendered and committed (`worker/renderer/splash.png`); still need
