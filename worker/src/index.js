@@ -98,6 +98,27 @@ export default {
       return jsonResponse(slim);
     }
 
+    // GET /firmware/check?current={N} — OTA version check.
+    // The device sends its compiled-in FIRMWARE_VERSION as `current` and its
+    // efuse MAC as the X-Device-Id header. We resolve a release channel (fast
+    // for opted-in device ids, slow for everyone else), look up that channel's
+    // latest version, and tell the device whether to update. The device acts
+    // solely on the presence of a non-empty X-Firmware-Url header.
+    if (url.pathname === '/firmware/check' && request.method === 'GET') {
+      return handleFirmwareCheck(request, env, url);
+    }
+
+    // GET /firmware/{version}.bin — stream a firmware binary from R2.
+    const firmwareBinMatch = url.pathname.match(/^\/firmware\/(\d+)\.bin$/);
+    if (firmwareBinMatch && request.method === 'GET') {
+      const version = firmwareBinMatch[1];
+      const obj = await env.FIRMWARE_BUCKET.get(`firmware/${version}.bin`);
+      if (!obj) {
+        return new Response('Not Found', { status: 404 });
+      }
+      return binaryResponse(obj.body);
+    }
+
     // Root info page
     if (url.pathname === '/') {
       const locations = await getLocations(env);
@@ -257,6 +278,48 @@ async function handleAdminPost(request, env) {
   return jsonResponse({ error: `Unknown action: ${action}` }, 400);
 }
 
+// ─── firmware OTA ────────────────────────────────────────────────────────────
+
+/**
+ * Resolve the OTA release channel for a device and report the latest version.
+ *
+ * Channel = "fast" if the device id is in the firmware:fast_devices KV array,
+ * else "slow". The channel's latest version comes from
+ * firmware:channel:{channel} (absent ⇒ 0). The device updates only when the
+ * latest version M is greater than its reported current version N, which it
+ * detects by the presence of a non-empty X-Firmware-Url header.
+ */
+async function handleFirmwareCheck(request, env, url) {
+  const deviceId = request.headers.get('X-Device-Id');
+  const current = parseInt(url.searchParams.get('current'), 10) || 0;
+
+  const fastDevices = (await env.WEATHER_KV.get('firmware:fast_devices', 'json')) || [];
+  const channel = deviceId && fastDevices.includes(deviceId) ? 'fast' : 'slow';
+
+  const latest = parseInt(await env.WEATHER_KV.get(`firmware:channel:${channel}`, 'text'), 10) || 0;
+  const update = latest > current;
+  const updateUrl = update ? `/firmware/${latest}.bin` : null;
+
+  const headers = {
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin': '*',
+    'X-Firmware-Channel': channel,
+    'X-Firmware-Latest': String(latest),
+  };
+  if (updateUrl) {
+    headers['X-Firmware-Url'] = updateUrl;
+  }
+
+  return new Response(
+    JSON.stringify(
+      { channel, latest, current, update, url: updateUrl },
+      null,
+      2,
+    ),
+    { status: 200, headers },
+  );
+}
+
 // ─── weather fetch + serve ───────────────────────────────────────────────────
 
 async function serveWeatherPng(env, loc) {
@@ -322,6 +385,16 @@ function pngResponse(pngBytes, updated) {
       'Content-Type': 'image/png',
       'X-Updated': updated,
       'Cache-Control': 'public, max-age=300',
+      'Access-Control-Allow-Origin': '*',
+    },
+  });
+}
+
+function binaryResponse(body) {
+  return new Response(body, {
+    headers: {
+      'Content-Type': 'application/octet-stream',
+      'Cache-Control': 'public, max-age=3600',
       'Access-Control-Allow-Origin': '*',
     },
   });

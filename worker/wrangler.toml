@@ -24,6 +24,13 @@ fallthrough = true
 binding = "WEATHER_KV"
 id = "bd1e4ef949604fcc8a02eb116c755dbc"
 
+# R2 bucket holding firmware binaries for OTA updates.
+# Object keys are firmware/{version}.bin (channel-agnostic).
+# One-time create: npx wrangler r2 bucket create weather-esp32-firmware
+[[r2_buckets]]
+binding = "FIRMWARE_BUCKET"
+bucket_name = "weather-esp32-firmware"
+
 # Environment variables
 # WEATHER_API_KEY is set via `wrangler secret put` (not in this file for security)
 [vars]
