@@ -130,21 +130,13 @@ binding = "WEATHER_KV"
 id = "<paste-id-here>"
 ```
 
-### 3. Create R2 bucket (OTA firmware)
-
-One-time bucket for OTA firmware binaries (matches the `FIRMWARE_BUCKET` binding in `wrangler.toml`):
-
-```bash
-npx wrangler r2 bucket create weather-esp32-firmware
-```
-
-### 4. Set API key secret
+### 3. Set API key secret
 
 ```bash
 npx wrangler secret put WEATHER_API_KEY
 ```
 
-### 5. Configure location (optional)
+### 4. Configure location (optional)
 
 Edit `wrangler.toml` to change the default location:
 
@@ -154,7 +146,7 @@ WEATHER_PROVIDER = "openweathermap"
 WEATHER_LOCATION = "40.739214,-73.987265"   # lat,lon
 ```
 
-### 6. Deploy
+### 5. Deploy
 
 ```bash
 npm run deploy

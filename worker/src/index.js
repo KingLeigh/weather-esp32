@@ -108,15 +108,17 @@ export default {
       return handleFirmwareCheck(request, env, url);
     }
 
-    // GET /firmware/{version}.bin — stream a firmware binary from R2.
+    // GET /firmware/{version}.bin — serve a firmware binary from KV.
+    // (Stored in KV for now; migrate to R2 once it's enabled on the account —
+    // see ROADMAP.md. The device-facing URL is identical either way.)
     const firmwareBinMatch = url.pathname.match(/^\/firmware\/(\d+)\.bin$/);
     if (firmwareBinMatch && request.method === 'GET') {
       const version = firmwareBinMatch[1];
-      const obj = await env.FIRMWARE_BUCKET.get(`firmware/${version}.bin`);
-      if (!obj) {
+      const bin = await env.WEATHER_KV.get(`firmware:bin:${version}`, 'arrayBuffer');
+      if (!bin) {
         return new Response('Not Found', { status: 404 });
       }
-      return binaryResponse(obj.body);
+      return binaryResponse(bin);
     }
 
     // Root info page
