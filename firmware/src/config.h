@@ -17,6 +17,12 @@
 inline constexpr const char *SERVER_BASE_URL =
     "https://weather-esp32.leigh-herbert.workers.dev";
 
+// Compiled-in firmware version. Integer, monotonically increasing. Sent to the
+// worker's /firmware/check endpoint as the `current` query param so the worker
+// can decide whether a newer build is available for this device's channel.
+// Displayed on the splash/setup screen as "vN". Bump on every OTA release.
+inline constexpr int FIRMWARE_VERSION = 1;
+
 struct DeviceConfig {
     String ssid;
     String password;  // empty for open networks

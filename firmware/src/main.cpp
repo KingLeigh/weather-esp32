@@ -22,6 +22,7 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
+#include <HTTPUpdate.h>
 #include <PNGdec.h>
 #include <qrcode.h>
 
@@ -68,6 +69,12 @@
 // Staleness threshold: show "Xm ago" / "Xh Ym ago" if data is older than this.
 #define STALE_THRESHOLD_MIN  30
 
+// OTA update check cadence. We only poll the worker's /firmware/check endpoint
+// once per this interval (not every wake) to keep the battery hit negligible.
+// 86400s = once per day. A failed check/update waits a full interval to retry
+// (prev_ota_check is stamped before the attempt), avoiding per-wake retry storms.
+#define OTA_CHECK_INTERVAL_S  86400
+
 // Battery: skip display refresh if battery changed less than this.
 #define BATTERY_TOLERANCE    10
 
@@ -89,6 +96,9 @@ RTC_DATA_ATTR static uint32_t boot_count          = 0;
 // re-flash the same splash on every wake (visible refresh + power cost).
 // Cleared whenever we successfully render weather.
 RTC_DATA_ATTR static bool     splash_already_drawn = false;
+// Wall-clock time (epoch seconds) of the last OTA version check. 0 = never
+// checked. Throttles the check to OTA_CHECK_INTERVAL_S; see checkForOtaUpdate().
+RTC_DATA_ATTR static time_t   prev_ota_check       = 0;
 
 // ─── globals (re-initialized every wake) ─────────────────────────────────────
 
@@ -202,6 +212,102 @@ static bool connectWiFi(const char *ssid, const char *password) {
 static void disconnectWiFi() {
     WiFi.disconnect(true);
     WiFi.mode(WIFI_OFF);
+}
+
+// ─── device identity ─────────────────────────────────────────────────────────
+
+// Stable per-chip ID: the eFuse MAC formatted as lowercase 12-char hex. Used as
+// the X-Device-Id header so the worker can route this device to a release
+// channel (fast/slow). Written into `buf` (must be >= 13 bytes).
+static void deviceId(char *buf, size_t bufSize) {
+    snprintf(buf, bufSize, "%012llx", ESP.getEfuseMac());
+}
+
+// ─── OTA firmware update ─────────────────────────────────────────────────────
+// Asks the worker whether a newer firmware build is available for this device's
+// channel, and if so streams it straight into the inactive OTA slot and reboots.
+//
+// Must be called with WiFi up and NTP synced. Throttled to OTA_CHECK_INTERVAL_S
+// via prev_ota_check (stamped before the attempt so a failure waits a full
+// interval). On a successful update the chip reboots into the new slot and this
+// never returns; otherwise it logs and returns so the normal weather flow runs.
+static void checkForOtaUpdate() {
+    time_t now;
+    if (time(&now) == (time_t)-1 || now <= 0) {
+        // No valid wall clock (NTP didn't sync) — can't safely throttle; skip.
+        Serial.println("OTA: no valid time, skipping check.");
+        return;
+    }
+    if (prev_ota_check != 0 && (now - prev_ota_check) < OTA_CHECK_INTERVAL_S) {
+        Serial.printf("OTA: last check %lds ago (< %ds) — skipping.\n",
+                      (long)(now - prev_ota_check), OTA_CHECK_INTERVAL_S);
+        return;
+    }
+    // Stamp before attempting so a failed check/update waits a full interval
+    // rather than retrying on every wake.
+    prev_ota_check = now;
+
+    char id[13];
+    deviceId(id, sizeof(id));
+
+    String checkUrl = String(SERVER_BASE_URL) + "/firmware/check?current="
+                      + FIRMWARE_VERSION;
+
+    WiFiClientSecure client;
+    client.setInsecure();
+
+    HTTPClient http;
+    http.begin(client, checkUrl);
+    http.setTimeout(15000);
+    http.setConnectTimeout(10000);
+    http.addHeader("X-Device-Id", id);
+
+    const char *headerKeys[] = {"X-Firmware-Url"};
+    http.collectHeaders(headerKeys, 1);
+
+    Serial.printf("OTA: GET %s (X-Device-Id: %s)\n", checkUrl.c_str(), id);
+    int httpCode = http.GET();
+    if (httpCode != HTTP_CODE_OK) {
+        Serial.printf("OTA: check HTTP error: %d\n", httpCode);
+        http.end();
+        return;
+    }
+
+    String fwUrl = http.header("X-Firmware-Url");
+    http.end();
+
+    if (fwUrl.length() == 0) {
+        Serial.println("OTA: up to date (no X-Firmware-Url).");
+        return;
+    }
+
+    String url = String(SERVER_BASE_URL) + fwUrl;
+    Serial.printf("OTA: update available, downloading %s\n", url.c_str());
+
+    WiFiClientSecure secureClient;
+    secureClient.setInsecure();
+
+    t_httpUpdate_return ret =
+        httpUpdate.update(secureClient, url, String(FIRMWARE_VERSION));
+
+    switch (ret) {
+        case HTTP_UPDATE_OK:
+            // The image is flashed into the inactive slot and otadata flipped;
+            // the chip normally reboots itself. Force it if it didn't.
+            Serial.println("OTA: update OK — rebooting into new firmware.");
+            Serial.flush();
+            ESP.restart();
+            break;
+        case HTTP_UPDATE_NO_UPDATES:
+            Serial.println("OTA: no updates (server reported none).");
+            break;
+        case HTTP_UPDATE_FAILED:
+        default:
+            Serial.printf("OTA: update FAILED (%d): %s\n",
+                          httpUpdate.getLastError(),
+                          httpUpdate.getLastErrorString().c_str());
+            break;
+    }
 }
 
 // ─── battery ─────────────────────────────────────────────────────────────────
@@ -454,6 +560,18 @@ void renderSplash(const char *wifiJoinStr) {
         drawQrOverPlaceholder(wifiJoinStr);
     }
 
+    // Firmware version + chip ID, bottom-left. Lets the owner read the running
+    // version and the device's channel ID off-screen. Bottom-left is clear of
+    // the QR area (QR_AREA_X=660), so this shows on both the plain splash and
+    // the QR setup screen.
+    char id[13];
+    deviceId(id, sizeof(id));
+    char verText[40];
+    snprintf(verText, sizeof(verText), "v%d  %s", FIRMWARE_VERSION, id);
+    int32_t vx = 10;
+    int32_t vy = EPD_HEIGHT - 12;
+    writeln((GFXfont *)&FiraSans, verText, &vx, &vy, framebuffer);
+
     pushDisplay();
 }
 
@@ -511,6 +629,14 @@ void setup() {
 
     Serial.printf("\n=== firmware  boot #%u  wakeup=%d ===\n",
                   boot_count, (int)wakeup);
+
+    // Print firmware version + device ID once so the owner can read them over
+    // serial (the device ID is also the OTA channel key sent to the worker).
+    {
+        char id[13];
+        deviceId(id, sizeof(id));
+        Serial.printf("Firmware v%d  device-id: %s\n", FIRMWARE_VERSION, id);
+    }
 
     // ── Button wake handling ─────────────────────────────────────────────
     // If the button woke us, require a long hold before doing anything — a
@@ -613,6 +739,11 @@ void setup() {
     bool fetchOk = false;
     if (connectWiFi(cfg.ssid.c_str(), cfg.password.c_str())) {
         fetchOk = fetchPng(pngUrl.c_str());
+        // OTA check while WiFi is up + NTP is synced. Throttled internally to
+        // once per OTA_CHECK_INTERVAL_S. On a successful update this reboots
+        // into the new slot and never returns; otherwise it falls through to
+        // the normal weather display + deep sleep.
+        checkForOtaUpdate();
         disconnectWiFi();
     } else {
         Serial.println("WiFi failed");
