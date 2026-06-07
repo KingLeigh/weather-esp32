@@ -17,10 +17,13 @@ WORKER_DIR="${SCRIPT_DIR}/../../worker"
 cd "$WORKER_DIR"
 
 echo "Reading firmware:channel:fast..."
-# `kv key get` exits non-zero if the key is missing; rescue with `|| true` so
-# set -e doesn't abort before the friendly empty-check below.
-FAST_VERSION="$(npx wrangler kv key get --binding=WEATHER_KV "firmware:channel:fast" 2>/dev/null || true)"
-FAST_VERSION="$(printf '%s' "$FAST_VERSION" | tr -d '[:space:]')"
+# `kv key get` EXITS NON-ZERO (404) for a missing key in wrangler v3 (and prints
+# the error to stdout), so key off the exit code rather than the captured text.
+if FAST_VERSION="$(npx wrangler kv key get --binding=WEATHER_KV "firmware:channel:fast" 2>/dev/null)"; then
+    FAST_VERSION="$(printf '%s' "$FAST_VERSION" | tr -d '[:space:]')"
+else
+    FAST_VERSION=""
+fi
 
 if [ -z "$FAST_VERSION" ]; then
     echo "ERROR: firmware:channel:fast is empty or unset — publish to fast first." >&2

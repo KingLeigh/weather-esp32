@@ -36,9 +36,15 @@ fi
 cd "$WORKER_DIR"
 
 echo "Reading firmware:fast_devices..."
-# `kv key get` exits non-zero if the key is missing; default to an empty array.
-CURRENT="$(npx wrangler kv key get --binding=WEATHER_KV "firmware:fast_devices" 2>/dev/null || true)"
-if [ -z "$(printf '%s' "$CURRENT" | tr -d '[:space:]')" ]; then
+# `kv key get` EXITS NON-ZERO (404) for a missing key in wrangler v3 — and prints
+# the error text to stdout too — so key off the exit code: a failed get means the
+# key doesn't exist yet, so start from an empty array. (A successful get returns a
+# clean value.)
+if CURRENT="$(npx wrangler kv key get --binding=WEATHER_KV "firmware:fast_devices" 2>/dev/null)"; then
+    if [ -z "$(printf '%s' "$CURRENT" | tr -d '[:space:]')" ]; then
+        CURRENT="[]"
+    fi
+else
     CURRENT="[]"
 fi
 
