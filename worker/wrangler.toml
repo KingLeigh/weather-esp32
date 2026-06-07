@@ -24,6 +24,9 @@ fallthrough = true
 binding = "WEATHER_KV"
 id = "bd1e4ef949604fcc8a02eb116c755dbc"
 
+# Firmware OTA binaries are stored in WEATHER_KV under firmware:bin:{version}
+# (interim — migrate to a dedicated R2 bucket once R2 is enabled; see ROADMAP.md).
+
 # Environment variables
 # WEATHER_API_KEY is set via `wrangler secret put` (not in this file for security)
 [vars]
