@@ -73,7 +73,14 @@
 // once per this interval (not every wake) to keep the battery hit negligible.
 // 86400s = once per day. A failed check/update waits a full interval to retry
 // (prev_ota_check is stamped before the attempt), avoiding per-wake retry storms.
+//
+// OTA_TEST_MODE (build flag — env firmware-ota-test) drops the interval to 0 so
+// the device checks on EVERY wake, for fast OTA iteration. Don't ship it.
+#ifdef OTA_TEST_MODE
+#define OTA_CHECK_INTERVAL_S  0
+#else
 #define OTA_CHECK_INTERVAL_S  86400
+#endif
 
 // Battery: skip display refresh if battery changed less than this.
 #define BATTERY_TOLERANCE    10
