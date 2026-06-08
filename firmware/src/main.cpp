@@ -665,9 +665,12 @@ static MenuButton readButtonEvent() {
     return BTN_SHORT;  // released before the long threshold
 }
 
-// Confirmation screen for the destructive factory reset. Returns true only if
-// the user long-presses to confirm; false on a short press or after a timeout.
-static bool confirmFactoryReset() {
+enum ConfirmResult { CONFIRM_YES, CONFIRM_NO, CONFIRM_TIMEOUT };
+
+// Confirmation screen for the destructive factory reset. CONFIRM_YES on a
+// long-press, CONFIRM_NO on a short-press (active cancel → back to the menu),
+// CONFIRM_TIMEOUT if the user walks away (idle → caller goes home to weather).
+static ConfirmResult confirmFactoryReset() {
     memset(framebuffer, 0xFF, EPD_WIDTH * EPD_HEIGHT / 2);
     int32_t x = 60, y = 150;
     writeln((GFXfont *)&FiraSans, "Factory reset?", &x, &y, framebuffer);
@@ -682,11 +685,11 @@ static bool confirmFactoryReset() {
     unsigned long start = millis();
     while (millis() - start < MENU_CONFIRM_TIMEOUT_MS) {
         MenuButton ev = readButtonEvent();
-        if (ev == BTN_LONG)  return true;
-        if (ev == BTN_SHORT) return false;
+        if (ev == BTN_LONG)  return CONFIRM_YES;
+        if (ev == BTN_SHORT) return CONFIRM_NO;
         delay(20);
     }
-    return false;  // timed out — treat as cancel
+    return CONFIRM_TIMEOUT;  // user walked away
 }
 
 // On-device menu. Short press cycles the cursor, long press selects. Returns on
@@ -725,23 +728,29 @@ static void enterMenuMode() {
                     return;
                 case MENU_DEVICE_SETUP:
                     // Bring up the AP + captive portal. On a successful save this
-                    // esp_restart()s (never returns); on idle timeout it returns
-                    // and we redraw the menu.
+                    // esp_restart()s (never returns); it returns only on its own
+                    // idle timeout — treat that as "go home": exit the menu so the
+                    // caller drops back to weather (or the onboarding splash).
                     Serial.println("Menu: entering device setup.");
                     enterSetupMode();
-                    renderMenu(selected);
-                    break;
-                case MENU_FACTORY_RESET:
-                    if (confirmFactoryReset()) {
+                    Serial.println("Setup idle timeout — exiting menu.");
+                    return;
+                case MENU_FACTORY_RESET: {
+                    ConfirmResult cr = confirmFactoryReset();
+                    if (cr == CONFIRM_YES) {
                         Serial.println("Menu: factory reset confirmed — clearing config.");
                         clearConfig();
                         splash_already_drawn = false;  // show onboarding splash after reboot
                         delay(200);
                         esp_restart();  // reboot into a clean, unconfigured state
+                    } else if (cr == CONFIRM_TIMEOUT) {
+                        Serial.println("Factory-reset confirm timed out — exiting menu.");
+                        return;  // idle → go home (weather / splash)
                     }
                     Serial.println("Menu: factory reset canceled.");
                     renderMenu(selected);
                     break;
+                }
                 default:  // MENU_DEBUG (and any future not-yet-wired item)
                     showComingSoon();
                     renderMenu(selected);
