@@ -31,6 +31,7 @@
 
 #include "config.h"
 #include "splash_png.h"
+#include "menu_png.h"
 #include "render.h"
 #include "setup_mode.h"
 
@@ -52,6 +53,27 @@
 // pull the user out of normal operation.
 #define BUTTON_GPIO          GPIO_NUM_21
 #define BUTTON_HOLD_MS       1500
+
+// ── On-device menu ───────────────────────────────────────────────────────────
+// Opened by a long-press wake; navigated by short presses (cycle the cursor),
+// items chosen by another long-press. Rendered from the bundled menu PNG
+// (menu_png.h); the cursor arrow is drawn on-device in the reserved left column.
+// ⚠️ Row geometry MUST match worker/renderer/src/menu.jsx (ROW_Y0/ROW_H/items).
+#define MENU_ITEM_COUNT      4
+#define MENU_ROW_Y0          195    // y-centre (px) of the first menu row
+#define MENU_ROW_DY          90     // row pitch (px)
+#define MENU_CURSOR_X        50     // left x (px) of the cursor arrow
+#define MENU_CURSOR_W        34     // arrow width (px)
+#define MENU_CURSOR_H        40     // arrow height (px)
+#define MENU_IDLE_TIMEOUT_MS 30000  // auto-exit the menu after this much inactivity
+
+// Menu item indices — order MUST match the rows in menu.jsx.
+enum MenuItem {
+    MENU_DEVICE_SETUP  = 0,
+    MENU_DEBUG         = 1,
+    MENU_FACTORY_RESET = 2,
+    MENU_EXIT          = 3,
+};
 
 // QR overlay placement on the splash. Coordinates match the placeholder box
 // in splash.jsx: the bottom-right column of the layout, vertically centered
@@ -582,6 +604,109 @@ void renderSplash(const char *wifiJoinStr) {
     pushDisplay();
 }
 
+// ─── on-device menu ─────────────────────────────────────────────────────────
+
+// Renders the bundled menu PNG with the cursor arrow at the selected row.
+// Full-screen refresh (increment 1; a partial-refresh cursor is a later step).
+static void renderMenu(int selectedIndex) {
+    int rc = png.openRAM((uint8_t *)menu_png, menu_png_len, png_draw_callback);
+    if (rc != PNG_SUCCESS) {
+        Serial.printf("Menu openRAM failed: %d\n", rc);
+        return;
+    }
+    rc = png.decode(nullptr, 0);
+    png.close();
+    if (rc != PNG_SUCCESS) {
+        Serial.printf("Menu decode failed: %d\n", rc);
+        return;
+    }
+
+    // Cursor arrow (right-pointing triangle) at the selected row's centre, in
+    // the white column left of the item text. Row centre matches menu.jsx.
+    int32_t cy = MENU_ROW_Y0 + selectedIndex * MENU_ROW_DY;
+    epd_fill_triangle(MENU_CURSOR_X,                 cy - MENU_CURSOR_H / 2,
+                      MENU_CURSOR_X,                 cy + MENU_CURSOR_H / 2,
+                      MENU_CURSOR_X + MENU_CURSOR_W, cy,
+                      0x00, framebuffer);
+
+    pushDisplay();
+}
+
+// Brief placeholder shown when an unimplemented menu item is selected
+// (increment 1 stubs: Device setup / Debug / Factory reset).
+static void showComingSoon() {
+    memset(framebuffer, 0xFF, EPD_WIDTH * EPD_HEIGHT / 2);
+    int32_t x = 60;
+    int32_t y = EPD_HEIGHT / 2;
+    writeln((GFXfont *)&FiraSans, "Coming soon...", &x, &y, framebuffer);
+    pushDisplay();
+    delay(1500);
+}
+
+enum MenuButton { BTN_NONE, BTN_SHORT, BTN_LONG };
+
+// Polls the button once. Returns BTN_NONE if not pressed; otherwise blocks for
+// the press duration and classifies SHORT (< BUTTON_HOLD_MS) vs LONG. For a
+// LONG press it waits for release so the hold isn't re-read as another event.
+static MenuButton readButtonEvent() {
+    if (digitalRead(BUTTON_GPIO) == HIGH) return BTN_NONE;  // not pressed
+    delay(20);                                              // debounce
+    if (digitalRead(BUTTON_GPIO) == HIGH) return BTN_NONE;  // bounce / noise
+
+    unsigned long pressStart = millis();
+    while (digitalRead(BUTTON_GPIO) == LOW) {
+        if (millis() - pressStart >= BUTTON_HOLD_MS) {
+            while (digitalRead(BUTTON_GPIO) == LOW) delay(10);  // wait for release
+            return BTN_LONG;
+        }
+        delay(10);
+    }
+    return BTN_SHORT;  // released before the long threshold
+}
+
+// On-device menu. Short press cycles the cursor, long press selects. Returns on
+// "Exit menu" or after MENU_IDLE_TIMEOUT_MS of inactivity. Increment 1: only
+// Exit is wired; other items show a "coming soon" placeholder. Assumes the
+// framebuffer is already allocated.
+static void enterMenuMode() {
+    Serial.println("=== Entering menu mode ===");
+    pinMode(BUTTON_GPIO, INPUT_PULLUP);
+
+    // The wake long-press may still be held — wait for release so it isn't
+    // immediately read as a selection.
+    while (digitalRead(BUTTON_GPIO) == LOW) delay(10);
+    delay(50);
+
+    int selected = 0;
+    renderMenu(selected);
+    unsigned long lastActivity = millis();
+
+    while (millis() - lastActivity < MENU_IDLE_TIMEOUT_MS) {
+        MenuButton ev = readButtonEvent();
+        if (ev == BTN_NONE) {
+            delay(20);
+            continue;
+        }
+        lastActivity = millis();
+        if (ev == BTN_SHORT) {
+            selected = (selected + 1) % MENU_ITEM_COUNT;
+            Serial.printf("Menu: cursor -> item %d\n", selected);
+            renderMenu(selected);
+        } else {  // BTN_LONG — select
+            Serial.printf("Menu: select item %d\n", selected);
+            if (selected == MENU_EXIT) {
+                Serial.println("Menu: exit.");
+                return;
+            }
+            // Device setup / Debug / Factory reset are not wired yet (increment 1).
+            showComingSoon();
+            renderMenu(selected);
+            lastActivity = millis();
+        }
+    }
+    Serial.println("Menu: idle timeout — exiting.");
+}
+
 // ─── deep sleep ──────────────────────────────────────────────────────────────
 
 // armTimer=false: only the button wakes the chip (used in the no-config state
@@ -648,9 +773,9 @@ void setup() {
     // ── Button wake handling ─────────────────────────────────────────────
     // If the button woke us, require a long hold before doing anything — a
     // brief tap is treated as accidental and we go straight back to sleep
-    // (no EPD spin-up, no WiFi). A confirmed long press flips wantSetup so
-    // the post-config branch enters setup mode after the splash refreshes.
-    bool wantSetup = false;
+    // (no EPD spin-up, no WiFi). A confirmed long press flips wantMenu so the
+    // post-config branch opens the on-device menu instead of fetching weather.
+    bool wantMenu = false;
     if (wakeup == ESP_SLEEP_WAKEUP_EXT0) {
         Serial.println("Wakeup: button on IO21");
         pinMode(BUTTON_GPIO, INPUT_PULLUP);
@@ -664,8 +789,8 @@ void setup() {
             }
             delay(20);
         }
-        Serial.println("Long press confirmed (>1.5s) — entering setup mode after splash.");
-        wantSetup = true;
+        Serial.println("Long press confirmed (>1.5s) — opening menu.");
+        wantMenu = true;
     }
 
     // Init display + framebuffer.
@@ -695,31 +820,30 @@ void setup() {
         Serial.println("No NVS config — device not yet set up.");
     }
 
-    // ── Setup-mode entry (long-press) ────────────────────────────────────
-    if (wantSetup) {
-        Serial.println("Long-press: entering setup mode.");
+    // ── Menu entry (long-press) ──────────────────────────────────────────
+    if (wantMenu) {
+        Serial.println("Long-press: opening on-device menu.");
 
-        // setup_mode brings up the AP and then renders the splash+QR composite
-        // itself (it knows the AP SSID, which is encoded in the QR). It either
-        // esp_restart()s on save success (never returns) or returns on idle
-        // timeout — we only reach the next line if the user gave up.
-        enterSetupMode();
+        // Navigable menu: short press cycles the cursor, long press selects.
+        // Returns on "Exit menu" or after an idle timeout. Increment 1 wires
+        // only Exit; the other items show a "coming soon" placeholder.
+        enterMenuMode();
 
-        if (!hasConfig) {
-            // Fresh device, user canceled setup. Stay on splash, button-only sleep.
-            Serial.println("Setup canceled with no existing config — sleeping until button.");
+        if (hasConfig) {
+            // Return to weather. The menu is currently on screen, so force a
+            // repaint on the next fetch (change detection would otherwise skip
+            // it when the fetched PNG matches the previously-displayed weather).
+            Serial.println("Menu exited — returning to weather.");
+            prev_png_hash = 0;
+            // fall through to the weather flow ↓
+        } else {
+            // No config yet — return to the onboarding splash, button-only sleep.
+            Serial.println("Menu exited with no config — showing splash.");
+            renderSplash();
+            splash_already_drawn = true;
             enterDeepSleep(/*armTimer=*/false);
             return;
         }
-
-        // We had existing config and the user changed nothing. Fall through to
-        // the normal weather flow — the device should always try to return to
-        // weather when it can. Force a display refresh because the splash is
-        // currently on screen; otherwise change detection would skip the push
-        // when the fetched PNG matches the previously-displayed weather.
-        Serial.println("Setup canceled — attempting to return to weather.");
-        prev_png_hash = 0;
-        // fall through ↓
     } else if (!hasConfig) {
         // No setup requested + no NVS config: show splash, wait for button.
         if (!splash_already_drawn) {
