@@ -66,6 +66,7 @@
 #define MENU_CURSOR_W        34     // arrow width (px)
 #define MENU_CURSOR_H        40     // arrow height (px)
 #define MENU_IDLE_TIMEOUT_MS 30000  // auto-exit the menu after this much inactivity
+#define MENU_CONFIRM_TIMEOUT_MS 15000  // factory-reset confirm auto-cancels after this
 
 // Menu item indices — order MUST match the rows in menu.jsx.
 enum MenuItem {
@@ -633,7 +634,7 @@ static void renderMenu(int selectedIndex) {
 }
 
 // Brief placeholder shown when an unimplemented menu item is selected
-// (increment 1 stubs: Device setup / Debug / Factory reset).
+// (currently only Debug mode).
 static void showComingSoon() {
     memset(framebuffer, 0xFF, EPD_WIDTH * EPD_HEIGHT / 2);
     int32_t x = 60;
@@ -664,9 +665,33 @@ static MenuButton readButtonEvent() {
     return BTN_SHORT;  // released before the long threshold
 }
 
+// Confirmation screen for the destructive factory reset. Returns true only if
+// the user long-presses to confirm; false on a short press or after a timeout.
+static bool confirmFactoryReset() {
+    memset(framebuffer, 0xFF, EPD_WIDTH * EPD_HEIGHT / 2);
+    int32_t x = 60, y = 150;
+    writeln((GFXfont *)&FiraSans, "Factory reset?", &x, &y, framebuffer);
+    x = 60; y = 240;
+    writeln((GFXfont *)&FiraSans, "Erases saved WiFi + location.", &x, &y, framebuffer);
+    x = 60; y = 360;
+    writeln((GFXfont *)&FiraSans, "Long-press = confirm", &x, &y, framebuffer);
+    x = 60; y = 420;
+    writeln((GFXfont *)&FiraSans, "Short-press = cancel", &x, &y, framebuffer);
+    pushDisplay();
+
+    unsigned long start = millis();
+    while (millis() - start < MENU_CONFIRM_TIMEOUT_MS) {
+        MenuButton ev = readButtonEvent();
+        if (ev == BTN_LONG)  return true;
+        if (ev == BTN_SHORT) return false;
+        delay(20);
+    }
+    return false;  // timed out — treat as cancel
+}
+
 // On-device menu. Short press cycles the cursor, long press selects. Returns on
-// "Exit menu" or after MENU_IDLE_TIMEOUT_MS of inactivity. Increment 1: only
-// Exit is wired; other items show a "coming soon" placeholder. Assumes the
+// "Exit menu" or after MENU_IDLE_TIMEOUT_MS of inactivity. Device setup and
+// Factory reset are wired; Debug mode is still a placeholder. Assumes the
 // framebuffer is already allocated.
 static void enterMenuMode() {
     Serial.println("=== Entering menu mode ===");
@@ -694,13 +719,34 @@ static void enterMenuMode() {
             renderMenu(selected);
         } else {  // BTN_LONG — select
             Serial.printf("Menu: select item %d\n", selected);
-            if (selected == MENU_EXIT) {
-                Serial.println("Menu: exit.");
-                return;
+            switch (selected) {
+                case MENU_EXIT:
+                    Serial.println("Menu: exit.");
+                    return;
+                case MENU_DEVICE_SETUP:
+                    // Bring up the AP + captive portal. On a successful save this
+                    // esp_restart()s (never returns); on idle timeout it returns
+                    // and we redraw the menu.
+                    Serial.println("Menu: entering device setup.");
+                    enterSetupMode();
+                    renderMenu(selected);
+                    break;
+                case MENU_FACTORY_RESET:
+                    if (confirmFactoryReset()) {
+                        Serial.println("Menu: factory reset confirmed — clearing config.");
+                        clearConfig();
+                        splash_already_drawn = false;  // show onboarding splash after reboot
+                        delay(200);
+                        esp_restart();  // reboot into a clean, unconfigured state
+                    }
+                    Serial.println("Menu: factory reset canceled.");
+                    renderMenu(selected);
+                    break;
+                default:  // MENU_DEBUG (and any future not-yet-wired item)
+                    showComingSoon();
+                    renderMenu(selected);
+                    break;
             }
-            // Device setup / Debug / Factory reset are not wired yet (increment 1).
-            showComingSoon();
-            renderMenu(selected);
             lastActivity = millis();
         }
     }
