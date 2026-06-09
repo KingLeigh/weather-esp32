@@ -96,6 +96,12 @@ enum MenuItem {
 // available firmware version on every weather response (X-Firmware-Latest),
 // which fetchPng() captures into latestFirmwareAvail. No separate
 // /firmware/check request and no once-a-day throttle — see applyOtaUpdate().
+//
+// If a flash attempt fails, that version is skipped for this many wakes before
+// being retried — a transient error must not permanently block updates, so the
+// skip is a cooldown, not a permanent ban. At SLEEP_MINUTES=10 this is ~6 hours
+// (a newer published version bypasses the cooldown and retries immediately).
+#define OTA_FAIL_COOLDOWN_WAKES  36
 
 // Battery: skip display refresh if battery changed less than this.
 #define BATTERY_TOLERANCE    10
@@ -118,10 +124,13 @@ RTC_DATA_ATTR static uint32_t boot_count          = 0;
 // re-flash the same splash on every wake (visible refresh + power cost).
 // Cleared whenever we successfully render weather.
 RTC_DATA_ATTR static bool     splash_already_drawn = false;
-// Firmware version that an OTA flash last failed on. Set after a failed
-// httpUpdate so we don't re-download the same broken build on every wake; a
-// newer advertised version or a power cycle (clears RTC) re-enables the attempt.
+// OTA failure cooldown. After a failed httpUpdate we record the version and the
+// boot_count at which it may be retried (set to boot_count + OTA_FAIL_COOLDOWN_
+// WAKES). This stops a broken build re-downloading every wake, but auto-retries
+// once the window elapses, so a transient error can never permanently block
+// updates. A newer advertised version bypasses it; a power-on reset clears it.
 RTC_DATA_ATTR static int      ota_failed_version   = 0;
+RTC_DATA_ATTR static uint32_t ota_retry_after_boot = 0;
 
 // ─── globals (re-initialized every wake) ─────────────────────────────────────
 
@@ -694,9 +703,11 @@ static void drawDebugScreen(const DebugInfo &d) {
     // carries X-Firmware-Latest). Lets you see at a glance whether the device
     // thinks it's current — a persistent "(update available)" across debug runs
     // means it's discovering updates but not applying them.
-    // TODO: surface OTA *failure* detail here in future — e.g. when
-    // ota_failed_version is set, show "(update FAILED: vN)" plus the last
-    // httpUpdate error, so a stuck/looping OTA is visible on-device.
+    // TODO: OTA diagnostics + manual control (see ROADMAP.md). Surface *why* an
+    // update failed — persist + show the httpUpdate error (getLastError /
+    // getLastErrorString) and ota_failed_version — and add a way to force-retry
+    // past the cooldown. Likely wants a second debug page or a dedicated
+    // "Software update" menu item rather than crowding this screen.
     if (d.server == SS_OK) {
         snprintf(line, sizeof(line), "Software version: v%d (%s)", FIRMWARE_VERSION,
                  d.latestFw > FIRMWARE_VERSION ? "update available" : "up to date");
@@ -1142,13 +1153,24 @@ void setup() {
     // The worker advertises the latest firmware version on every weather
     // response (X-Firmware-Latest → latestFirmwareAvail). If it's newer than
     // what we're running, flash it now — after the weather is on screen, while
-    // WiFi is still up. A just-failed version is skipped so a bad build doesn't
-    // re-download every wake. applyOtaUpdate() reboots into the new slot on
-    // success (never returns).
-    if (fetchOk && latestFirmwareAvail > FIRMWARE_VERSION
-                && latestFirmwareAvail != ota_failed_version) {
+    // WiFi is still up. applyOtaUpdate() reboots into the new slot on success
+    // (never returns).
+    //
+    // A version that just failed to flash is skipped only until its cooldown
+    // elapses (boot_count reaches ota_retry_after_boot) — a transient error
+    // won't re-download the same build every wake, but it auto-retries after
+    // ~OTA_FAIL_COOLDOWN_WAKES wakes so the device can never get stuck. A newer
+    // published version (latestFirmwareAvail != ota_failed_version) bypasses the
+    // cooldown immediately.
+    bool inFailCooldown = (latestFirmwareAvail == ota_failed_version
+                           && boot_count < ota_retry_after_boot);
+    if (fetchOk && latestFirmwareAvail > FIRMWARE_VERSION && !inFailCooldown) {
         if (!applyOtaUpdate(latestFirmwareAvail)) {
-            ota_failed_version = latestFirmwareAvail;
+            ota_failed_version   = latestFirmwareAvail;
+            ota_retry_after_boot = boot_count + OTA_FAIL_COOLDOWN_WAKES;
+            Serial.printf("OTA: v%d failed — cooling down %d wakes (retry at boot #%u)\n",
+                          latestFirmwareAvail, OTA_FAIL_COOLDOWN_WAKES,
+                          (unsigned)ota_retry_after_boot);
         }
     }
     disconnectWiFi();

@@ -63,8 +63,14 @@ Follow-ups:
   piggyback path (e.g. send the chip ID on the weather fetch and resolve the channel
   server-side) so gifted devices can lag a canary again. `ota-promote.sh` no longer
   gates current devices until this lands.
-- **Surface OTA failures on the debug screen.** Show a failed/looping update
-  (`ota_failed_version` + last error) so a stuck device is diagnosable on-device.
+- **OTA diagnostics + manual control on-device.**
+  - **Force-retry an update** — a way to bypass the failure cooldown and re-attempt
+    on demand (e.g. from the menu), instead of waiting out `OTA_FAIL_COOLDOWN_WAKES`.
+  - **Surface *why* an OTA failed** — persist + show the `httpUpdate` error
+    (`getLastError()` / `getLastErrorString()`) and the failed version on-screen, so a
+    stuck/looping update is diagnosable without serial.
+  - This likely needs a **second page of debug info**, or possibly its own
+    **"Software update" menu item**, rather than crowding the Live test screen.
 
 ### Smaller items
 - **Battery life** — consider raising the device poll interval (`SLEEP_MINUTES`,
