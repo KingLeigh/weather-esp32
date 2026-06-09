@@ -5,6 +5,11 @@
 # firmware:channel:slow. Run this after you've vetted the fast build on your
 # own device — it ships the *same* binary to every other device, no rebuild.
 #
+# NOTE: current (piggyback-discovery) firmware reads the FAST channel straight
+# off the weather header and ignores slow, so this no longer gates updated
+# devices — it only affects legacy pre-piggyback firmware on /firmware/check.
+# See docs/ota.md.
+#
 # Usage: ota-promote.sh
 #
 # A real promote needs `wrangler login` first. See docs/ota.md.

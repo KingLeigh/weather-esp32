@@ -6,18 +6,19 @@ Rough priority order within each section.
 
 ## Firmware (device)
 
-### On-device button menu — 🚧 In progress (PR #4)
+### On-device button menu — ✅ Core shipped (PR #4)
 Replaces the single-gesture IO21 model (tap = ignored, long-press = setup) with a
 button-operated menu on the e-paper: long-press opens it, short press cycles a
 cursor, long press selects, and idle returns home (weather if configured, else the
 onboarding splash). Rendered on-device (no companion app) — its main value is
 visibility when WiFi or the server is unreachable.
 
-Wired so far: **Exit**, **Device setup** (the existing captive-portal onboarding),
-and **Factory reset** (with a confirmation step). Remaining:
-- **Debug mode** — *Live test* (WiFi → server → fetch, reporting each step on screen)
-  and *Debug logs* (a persisted history of recent fetch attempts + live diagnostics
-  like RSSI, fail counts, last-good fetch). Drawn on-device since it matters most when
+Shipped: **Exit**, **Device setup** (the existing captive-portal onboarding),
+**Factory reset** (with a confirmation step), and **Debug mode → Live test**
+(actively runs WiFi → server → fetch and reports each result on-screen, including
+the firmware version with "up to date" / "update available"). Remaining:
+- **Debug logs** — a persisted history of recent fetch attempts + live diagnostics
+  (RSSI, fail counts, last-good fetch). Drawn on-device since it matters most when
   offline. Likely the point to extract the menu into its own `menu.cpp`.
 - **Partial-refresh cursor** — the cursor currently does a full-screen refresh per move.
 - **Setup-screen text rework** (the splash doubles as the onboarding and setup-QR
@@ -39,10 +40,18 @@ separately.
 
 ### OTA (over-the-air) firmware updates — ✅ Shipped
 The device pulls and flashes new firmware from the worker over WiFi — validated
-end-to-end (a device self-updated v1→v2 over the air). Fast/slow release channels
-are resolved server-side by chip ID, so each release can be canaried on your own
-device before it reaches gifted ("slow") devices. Release flow + scripts are in
-`docs/ota.md` and `firmware/scripts/ota-{publish,promote,add-fast-device}.sh`.
+end-to-end (devices have self-updated v1→v2 and v2→v3 over the air). Discovery is
+**free and every wake**: the worker advertises the latest available version on
+every weather response via the `X-Firmware-Latest` header, and the device flashes a
+newer build *after* rendering the weather (no separate request, no once/day
+throttle). Release flow + scripts are in `docs/ota.md` and
+`firmware/scripts/ota-{publish,promote,add-fast-device}.sh`.
+
+Fast/slow release channels still exist server-side (resolved by chip ID on the
+legacy `/firmware/check` endpoint, which pre-piggyback firmware uses to bootstrap
+onto a piggyback build), but current firmware **skips channel resolution** — the
+weather header always reports the *fast* version, so every updated device tracks
+fast.
 
 Follow-ups:
 - **Migrate binary storage from KV to R2.** The binary currently lives in Cloudflare
@@ -50,10 +59,12 @@ Follow-ups:
   the account. Move it to a dedicated R2 bucket (`weather-esp32-firmware`) once R2 is
   available; the device-facing `/firmware/{version}.bin` URL is unchanged, so only the
   worker's read and the `ota-publish.sh` upload change.
-- **Piggyback the version check on the weather fetch.** The device already fetches the
-  weather PNG every wake; adding the channel-resolved latest version as a header on that
-  response would let it discover new builds for free — dropping the separate
-  `/firmware/check` request (and probably the once/day throttle).
+- **Per-device channels on the weather header.** Restore the fast/slow split for the
+  piggyback path (e.g. send the chip ID on the weather fetch and resolve the channel
+  server-side) so gifted devices can lag a canary again. `ota-promote.sh` no longer
+  gates current devices until this lands.
+- **Surface OTA failures on the debug screen.** Show a failed/looping update
+  (`ota_failed_version` + last error) so a stuck device is diagnosable on-device.
 
 ### Smaller items
 - **Battery life** — consider raising the device poll interval (`SLEEP_MINUTES`,
