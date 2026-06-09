@@ -31,6 +31,7 @@
 
 #include "config.h"
 #include "splash_png.h"
+#include "menu_png.h"
 #include "render.h"
 #include "setup_mode.h"
 
@@ -52,6 +53,28 @@
 // pull the user out of normal operation.
 #define BUTTON_GPIO          GPIO_NUM_21
 #define BUTTON_HOLD_MS       1500
+
+// ── On-device menu ───────────────────────────────────────────────────────────
+// Opened by a long-press wake; navigated by short presses (cycle the cursor),
+// items chosen by another long-press. Rendered from the bundled menu PNG
+// (menu_png.h); the cursor arrow is drawn on-device in the reserved left column.
+// ⚠️ Row geometry MUST match worker/renderer/src/menu.jsx (ROW_Y0/ROW_H/items).
+#define MENU_ITEM_COUNT      4
+#define MENU_ROW_Y0          195    // y-centre (px) of the first menu row
+#define MENU_ROW_DY          90     // row pitch (px)
+#define MENU_CURSOR_X        50     // left x (px) of the cursor arrow
+#define MENU_CURSOR_W        34     // arrow width (px)
+#define MENU_CURSOR_H        40     // arrow height (px)
+#define MENU_IDLE_TIMEOUT_MS 30000  // auto-exit the menu after this much inactivity
+#define MENU_CONFIRM_TIMEOUT_MS 15000  // factory-reset confirm auto-cancels after this
+
+// Menu item indices — order MUST match the rows in menu.jsx.
+enum MenuItem {
+    MENU_DEVICE_SETUP  = 0,
+    MENU_DEBUG         = 1,
+    MENU_FACTORY_RESET = 2,
+    MENU_EXIT          = 3,
+};
 
 // QR overlay placement on the splash. Coordinates match the placeholder box
 // in splash.jsx: the bottom-right column of the layout, vertically centered
@@ -117,6 +140,7 @@ static uint16_t line_rgb565[EPD_WIDTH + 16];
 static uint8_t  *pngBuf     = nullptr;
 static int32_t   pngLen     = 0;
 static char      updatedStr[32] = {0};  // X-Updated header value
+static int       lastHttpCode   = 0;    // HTTP status from the last fetchPng()
 
 // ─── simple hash (djb2) ─────────────────────────────────────────────────────
 
@@ -428,6 +452,7 @@ static bool fetchPng(const char *url) {
 
     Serial.printf("GET %s\n", url);
     int httpCode = http.GET();
+    lastHttpCode = httpCode;
 
     if (httpCode != HTTP_CODE_OK) {
         Serial.printf("HTTP error: %d\n", httpCode);
@@ -582,6 +607,355 @@ void renderSplash(const char *wifiJoinStr) {
     pushDisplay();
 }
 
+// ─── on-device menu ─────────────────────────────────────────────────────────
+
+// Renders the bundled menu PNG with the cursor arrow at the selected row.
+// Full-screen refresh (increment 1; a partial-refresh cursor is a later step).
+static void renderMenu(int selectedIndex) {
+    int rc = png.openRAM((uint8_t *)menu_png, menu_png_len, png_draw_callback);
+    if (rc != PNG_SUCCESS) {
+        Serial.printf("Menu openRAM failed: %d\n", rc);
+        return;
+    }
+    rc = png.decode(nullptr, 0);
+    png.close();
+    if (rc != PNG_SUCCESS) {
+        Serial.printf("Menu decode failed: %d\n", rc);
+        return;
+    }
+
+    // Cursor arrow (right-pointing triangle) at the selected row's centre, in
+    // the white column left of the item text. Row centre matches menu.jsx.
+    int32_t cy = MENU_ROW_Y0 + selectedIndex * MENU_ROW_DY;
+    epd_fill_triangle(MENU_CURSOR_X,                 cy - MENU_CURSOR_H / 2,
+                      MENU_CURSOR_X,                 cy + MENU_CURSOR_H / 2,
+                      MENU_CURSOR_X + MENU_CURSOR_W, cy,
+                      0x00, framebuffer);
+
+    pushDisplay();
+}
+
+// Brief placeholder shown when an unimplemented menu item is selected
+// (currently only Debug mode).
+static void showComingSoon() {
+    memset(framebuffer, 0xFF, EPD_WIDTH * EPD_HEIGHT / 2);
+    int32_t x = 60;
+    int32_t y = EPD_HEIGHT / 2;
+    writeln((GFXfont *)&FiraSans, "Coming soon...", &x, &y, framebuffer);
+    pushDisplay();
+    delay(1500);
+}
+
+enum MenuButton { BTN_NONE, BTN_SHORT, BTN_LONG };
+
+// Polls the button once. Returns BTN_NONE if not pressed; otherwise blocks for
+// the press duration and classifies SHORT (< BUTTON_HOLD_MS) vs LONG. For a
+// LONG press it waits for release so the hold isn't re-read as another event.
+static MenuButton readButtonEvent() {
+    if (digitalRead(BUTTON_GPIO) == HIGH) return BTN_NONE;  // not pressed
+    delay(20);                                              // debounce
+    if (digitalRead(BUTTON_GPIO) == HIGH) return BTN_NONE;  // bounce / noise
+
+    unsigned long pressStart = millis();
+    while (digitalRead(BUTTON_GPIO) == LOW) {
+        if (millis() - pressStart >= BUTTON_HOLD_MS) {
+            while (digitalRead(BUTTON_GPIO) == LOW) delay(10);  // wait for release
+            return BTN_LONG;
+        }
+        delay(10);
+    }
+    return BTN_SHORT;  // released before the long threshold
+}
+
+enum ConfirmResult { CONFIRM_YES, CONFIRM_NO, CONFIRM_TIMEOUT };
+
+// Confirmation screen for the destructive factory reset. CONFIRM_YES on a
+// long-press, CONFIRM_NO on a short-press (active cancel → back to the menu),
+// CONFIRM_TIMEOUT if the user walks away (idle → caller goes home to weather).
+static ConfirmResult confirmFactoryReset() {
+    memset(framebuffer, 0xFF, EPD_WIDTH * EPD_HEIGHT / 2);
+    int32_t x = 60, y = 150;
+    writeln((GFXfont *)&FiraSans, "Factory reset?", &x, &y, framebuffer);
+    x = 60; y = 240;
+    writeln((GFXfont *)&FiraSans, "Erases saved WiFi + location.", &x, &y, framebuffer);
+    x = 60; y = 360;
+    writeln((GFXfont *)&FiraSans, "Long-press = confirm", &x, &y, framebuffer);
+    x = 60; y = 420;
+    writeln((GFXfont *)&FiraSans, "Short-press = cancel", &x, &y, framebuffer);
+    pushDisplay();
+
+    unsigned long start = millis();
+    while (millis() - start < MENU_CONFIRM_TIMEOUT_MS) {
+        MenuButton ev = readButtonEvent();
+        if (ev == BTN_LONG)  return CONFIRM_YES;
+        if (ev == BTN_SHORT) return CONFIRM_NO;
+        delay(20);
+    }
+    return CONFIRM_TIMEOUT;  // user walked away
+}
+
+// ─── debug live-test screen ─────────────────────────────────────────────────
+// A single on-device diagnostic screen: actively connects WiFi and fetches the
+// weather PNG, reporting each step's result. Drawn entirely with FiraSans (no
+// server PNG) so it works precisely when WiFi/server is unreachable. Reuses the
+// normal wake's connectWiFi()/fetchPng() so it exercises the real code path.
+
+enum DebugResult { DEBUG_BACK, DEBUG_TIMEOUT };
+enum WifiState   { WS_PENDING, WS_OK, WS_FAIL, WS_NA };
+enum ServerState { SS_PENDING, SS_OK, SS_HTTPFAIL, SS_NA };
+
+struct DebugInfo {
+    char        idStr[13];
+    char        timeStr[24];
+    const char *ssid;
+    WifiState   wifi;
+    int         rssi;
+    const char *zip;
+    ServerState server;
+    int         httpCode;
+    char        dataTime[24];
+    char        ageStr[16];
+};
+
+// Draws the full debug screen from the current DebugInfo (full refresh). Called
+// repeatedly as the live test progresses; not-yet-known fields show placeholders.
+static void drawDebugScreen(const DebugInfo &d) {
+    memset(framebuffer, 0xFF, EPD_WIDTH * EPD_HEIGHT / 2);
+    char line[80];
+    int32_t x, y;
+
+    // Title + divider (mirrors the menu chrome).
+    x = 60; y = 64;
+    writeln((GFXfont *)&FiraSans, "Debug", &x, &y, framebuffer);
+    epd_fill_rect(60, 92, EPD_WIDTH - 120, 3, OVERLAY_COLOR_MUTED, framebuffer);
+
+    // Device identity.
+    x = 60; y = 150;
+    snprintf(line, sizeof(line), "Device ID: %s", d.idStr);
+    writeln((GFXfont *)&FiraSans, line, &x, &y, framebuffer);
+
+    x = 60; y = 196;
+    snprintf(line, sizeof(line), "Software version: v%d", FIRMWARE_VERSION);
+    writeln((GFXfont *)&FiraSans, line, &x, &y, framebuffer);
+
+    x = 60; y = 242;
+    snprintf(line, sizeof(line), "Device time: %s", d.timeStr);
+    writeln((GFXfont *)&FiraSans, line, &x, &y, framebuffer);
+
+    // WiFi.
+    x = 60; y = 308;
+    if (d.wifi == WS_NA) {
+        snprintf(line, sizeof(line), "WiFi: (not configured)");
+    } else {
+        char wbuf[40];
+        const char *ws;
+        switch (d.wifi) {
+            case WS_OK:   snprintf(wbuf, sizeof(wbuf), "connected, %d dBm", d.rssi);
+                          ws = wbuf; break;
+            case WS_FAIL: ws = "failed to connect"; break;
+            default:      ws = "connecting..."; break;
+        }
+        snprintf(line, sizeof(line), "WiFi: %s  (%s)", d.ssid, ws);
+    }
+    writeln((GFXfont *)&FiraSans, line, &x, &y, framebuffer);
+
+    // Weather.
+    x = 60; y = 374;
+    snprintf(line, sizeof(line), "Weather location: %s",
+             (d.zip && d.zip[0]) ? d.zip : "(none)");
+    writeln((GFXfont *)&FiraSans, line, &x, &y, framebuffer);
+
+    x = 60; y = 420;
+    char sbuf[32];
+    const char *ss;
+    switch (d.server) {
+        case SS_OK:       ss = "Yes"; break;
+        case SS_HTTPFAIL: snprintf(sbuf, sizeof(sbuf), "No (HTTP %d)", d.httpCode);
+                          ss = sbuf; break;
+        case SS_NA:       ss = "- (no WiFi)"; break;
+        default:          ss = "checking..."; break;
+    }
+    snprintf(line, sizeof(line), "Weather server accessible: %s", ss);
+    writeln((GFXfont *)&FiraSans, line, &x, &y, framebuffer);
+
+    x = 60; y = 466;
+    if (d.dataTime[0])
+        snprintf(line, sizeof(line), "Weather data: %s  (%s)", d.dataTime, d.ageStr);
+    else
+        snprintf(line, sizeof(line), "Weather data: -");
+    writeln((GFXfont *)&FiraSans, line, &x, &y, framebuffer);
+
+    pushDisplay();
+}
+
+// Captures the device's current local time into buf ("(no time)" if unsynced).
+static void currentTimeStr(char *buf, size_t bufSize) {
+    struct tm ti;
+    if (getLocalTime(&ti, 0))
+        strftime(buf, bufSize, "%Y-%m-%d %H:%M:%S", &ti);
+    else
+        snprintf(buf, bufSize, "(no time)");
+}
+
+// Runs one live-test pass: draw the static screen immediately (WiFi/server show
+// "connecting..."/"checking..." so the user sees the test started), then run
+// the WiFi connect AND the weather fetch, and redraw ONCE when both results are
+// ready. Leaves WiFi disconnected. The fetched PNG is freed here (not
+// displayed) — the post-menu fall-through re-fetches + repaints fresh weather
+// on menu exit.
+static void runDebugPass(const DeviceConfig &cfg, bool hasConfig) {
+    DebugInfo d;
+    memset(&d, 0, sizeof(d));
+    deviceId(d.idStr, sizeof(d.idStr));
+    d.ssid = cfg.ssid.c_str();
+    d.zip  = cfg.zip.c_str();
+    snprintf(d.timeStr, sizeof(d.timeStr), "...");
+
+    if (!hasConfig) {
+        // Nothing to test — show identity + "not configured" and bail.
+        d.wifi   = WS_NA;
+        d.server = SS_NA;
+        currentTimeStr(d.timeStr, sizeof(d.timeStr));
+        drawDebugScreen(d);
+        return;
+    }
+
+    // First draw (immediate): static fields + "connecting..."/"checking..."
+    // placeholders, so the user gets instant feedback that the test started.
+    d.wifi   = WS_PENDING;
+    d.server = SS_PENDING;
+    drawDebugScreen(d);
+
+    // Run both tests — WiFi connect, then the weather fetch — before redrawing.
+    // The screen updates once, when both results are ready.
+    bool wifiOk = connectWiFi(cfg.ssid.c_str(), cfg.password.c_str());
+    currentTimeStr(d.timeStr, sizeof(d.timeStr));
+    if (wifiOk) {
+        d.wifi = WS_OK;
+        d.rssi = WiFi.RSSI();
+
+        String url = String(SERVER_BASE_URL) + "/weather/" + cfg.zip + ".png";
+        bool fetchOk = fetchPng(url.c_str());
+        if (fetchOk) {
+            d.server = SS_OK;
+            strncpy(d.dataTime, updatedStr, sizeof(d.dataTime) - 1);
+            int ageMin = getAgeMinutes(updatedStr);
+            if (ageMin < 0)        snprintf(d.ageStr, sizeof(d.ageStr), "age unknown");
+            else if (ageMin < 60)  snprintf(d.ageStr, sizeof(d.ageStr), "%dm ago", ageMin);
+            else                   snprintf(d.ageStr, sizeof(d.ageStr), "%dh %dm ago",
+                                            ageMin / 60, ageMin % 60);
+            // Diagnostic only: free the buffer rather than display it. The
+            // post-menu fall-through re-fetches + repaints fresh weather on exit.
+            if (pngBuf) { free(pngBuf); pngBuf = nullptr; pngLen = 0; }
+        } else {
+            d.server   = SS_HTTPFAIL;
+            d.httpCode = lastHttpCode;
+        }
+        disconnectWiFi();
+    } else {
+        d.wifi   = WS_FAIL;
+        d.server = SS_NA;
+    }
+
+    // Second draw: both results together.
+    drawDebugScreen(d);
+}
+
+// Debug live-test screen. Runs a pass, then waits: any press (short or long)
+// returns to the menu, idle exits home (matches the menu idle rule). Assumes
+// the framebuffer is already allocated.
+static DebugResult runDebugScreen(const DeviceConfig &cfg, bool hasConfig) {
+    runDebugPass(cfg, hasConfig);
+
+    unsigned long start = millis();
+    while (millis() - start < MENU_IDLE_TIMEOUT_MS) {
+        if (readButtonEvent() != BTN_NONE) return DEBUG_BACK;  // any press → menu
+        delay(20);
+    }
+    return DEBUG_TIMEOUT;  // idle → home
+}
+
+// On-device menu. Short press cycles the cursor, long press selects. Returns on
+// "Exit menu" or after MENU_IDLE_TIMEOUT_MS of inactivity. Device setup, Debug
+// mode, and Factory reset are wired. Assumes the framebuffer is already
+// allocated; cfg/hasConfig are passed through to the debug live test.
+static void enterMenuMode(const DeviceConfig &cfg, bool hasConfig) {
+    Serial.println("=== Entering menu mode ===");
+    pinMode(BUTTON_GPIO, INPUT_PULLUP);
+
+    // The wake long-press may still be held — wait for release so it isn't
+    // immediately read as a selection.
+    while (digitalRead(BUTTON_GPIO) == LOW) delay(10);
+    delay(50);
+
+    int selected = 0;
+    renderMenu(selected);
+    unsigned long lastActivity = millis();
+
+    while (millis() - lastActivity < MENU_IDLE_TIMEOUT_MS) {
+        MenuButton ev = readButtonEvent();
+        if (ev == BTN_NONE) {
+            delay(20);
+            continue;
+        }
+        lastActivity = millis();
+        if (ev == BTN_SHORT) {
+            selected = (selected + 1) % MENU_ITEM_COUNT;
+            Serial.printf("Menu: cursor -> item %d\n", selected);
+            renderMenu(selected);
+        } else {  // BTN_LONG — select
+            Serial.printf("Menu: select item %d\n", selected);
+            switch (selected) {
+                case MENU_EXIT:
+                    Serial.println("Menu: exit.");
+                    return;
+                case MENU_DEVICE_SETUP:
+                    // Bring up the AP + captive portal. On a successful save this
+                    // esp_restart()s (never returns); it returns only on its own
+                    // idle timeout — treat that as "go home": exit the menu so the
+                    // caller drops back to weather (or the onboarding splash).
+                    Serial.println("Menu: entering device setup.");
+                    enterSetupMode();
+                    Serial.println("Setup idle timeout — exiting menu.");
+                    return;
+                case MENU_FACTORY_RESET: {
+                    ConfirmResult cr = confirmFactoryReset();
+                    if (cr == CONFIRM_YES) {
+                        Serial.println("Menu: factory reset confirmed — clearing config.");
+                        clearConfig();
+                        splash_already_drawn = false;  // show onboarding splash after reboot
+                        delay(200);
+                        esp_restart();  // reboot into a clean, unconfigured state
+                    } else if (cr == CONFIRM_TIMEOUT) {
+                        Serial.println("Factory-reset confirm timed out — exiting menu.");
+                        return;  // idle → go home (weather / splash)
+                    }
+                    Serial.println("Menu: factory reset canceled.");
+                    renderMenu(selected);
+                    break;
+                }
+                case MENU_DEBUG: {
+                    Serial.println("Menu: entering debug live test.");
+                    DebugResult dr = runDebugScreen(cfg, hasConfig);
+                    if (dr == DEBUG_TIMEOUT) {
+                        Serial.println("Debug idle timeout — exiting menu.");
+                        return;  // idle → go home (weather / splash)
+                    }
+                    Serial.println("Debug: back to menu.");
+                    renderMenu(selected);  // active back → redraw menu
+                    break;
+                }
+                default:  // any future not-yet-wired item
+                    showComingSoon();
+                    renderMenu(selected);
+                    break;
+            }
+            lastActivity = millis();
+        }
+    }
+    Serial.println("Menu: idle timeout — exiting.");
+}
+
 // ─── deep sleep ──────────────────────────────────────────────────────────────
 
 // armTimer=false: only the button wakes the chip (used in the no-config state
@@ -648,9 +1022,9 @@ void setup() {
     // ── Button wake handling ─────────────────────────────────────────────
     // If the button woke us, require a long hold before doing anything — a
     // brief tap is treated as accidental and we go straight back to sleep
-    // (no EPD spin-up, no WiFi). A confirmed long press flips wantSetup so
-    // the post-config branch enters setup mode after the splash refreshes.
-    bool wantSetup = false;
+    // (no EPD spin-up, no WiFi). A confirmed long press flips wantMenu so the
+    // post-config branch opens the on-device menu instead of fetching weather.
+    bool wantMenu = false;
     if (wakeup == ESP_SLEEP_WAKEUP_EXT0) {
         Serial.println("Wakeup: button on IO21");
         pinMode(BUTTON_GPIO, INPUT_PULLUP);
@@ -664,8 +1038,8 @@ void setup() {
             }
             delay(20);
         }
-        Serial.println("Long press confirmed (>1.5s) — entering setup mode after splash.");
-        wantSetup = true;
+        Serial.println("Long press confirmed (>1.5s) — opening menu.");
+        wantMenu = true;
     }
 
     // Init display + framebuffer.
@@ -695,31 +1069,30 @@ void setup() {
         Serial.println("No NVS config — device not yet set up.");
     }
 
-    // ── Setup-mode entry (long-press) ────────────────────────────────────
-    if (wantSetup) {
-        Serial.println("Long-press: entering setup mode.");
+    // ── Menu entry (long-press) ──────────────────────────────────────────
+    if (wantMenu) {
+        Serial.println("Long-press: opening on-device menu.");
 
-        // setup_mode brings up the AP and then renders the splash+QR composite
-        // itself (it knows the AP SSID, which is encoded in the QR). It either
-        // esp_restart()s on save success (never returns) or returns on idle
-        // timeout — we only reach the next line if the user gave up.
-        enterSetupMode();
+        // Navigable menu: short press cycles the cursor, long press selects.
+        // Returns on "Exit menu" or after an idle timeout. Device setup, Debug
+        // mode, and Factory reset are wired; cfg/hasConfig feed the debug test.
+        enterMenuMode(cfg, hasConfig);
 
-        if (!hasConfig) {
-            // Fresh device, user canceled setup. Stay on splash, button-only sleep.
-            Serial.println("Setup canceled with no existing config — sleeping until button.");
+        if (hasConfig) {
+            // Return to weather. The menu is currently on screen, so force a
+            // repaint on the next fetch (change detection would otherwise skip
+            // it when the fetched PNG matches the previously-displayed weather).
+            Serial.println("Menu exited — returning to weather.");
+            prev_png_hash = 0;
+            // fall through to the weather flow ↓
+        } else {
+            // No config yet — return to the onboarding splash, button-only sleep.
+            Serial.println("Menu exited with no config — showing splash.");
+            renderSplash();
+            splash_already_drawn = true;
             enterDeepSleep(/*armTimer=*/false);
             return;
         }
-
-        // We had existing config and the user changed nothing. Fall through to
-        // the normal weather flow — the device should always try to return to
-        // weather when it can. Force a display refresh because the splash is
-        // currently on screen; otherwise change detection would skip the push
-        // when the fetched PNG matches the previously-displayed weather.
-        Serial.println("Setup canceled — attempting to return to weather.");
-        prev_png_hash = 0;
-        // fall through ↓
     } else if (!hasConfig) {
         // No setup requested + no NVS config: show splash, wait for button.
         if (!splash_already_drawn) {
