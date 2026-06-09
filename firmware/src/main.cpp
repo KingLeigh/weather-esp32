@@ -140,6 +140,7 @@ static uint16_t line_rgb565[EPD_WIDTH + 16];
 static uint8_t  *pngBuf     = nullptr;
 static int32_t   pngLen     = 0;
 static char      updatedStr[32] = {0};  // X-Updated header value
+static int       lastHttpCode   = 0;    // HTTP status from the last fetchPng()
 
 // ─── simple hash (djb2) ─────────────────────────────────────────────────────
 
@@ -451,6 +452,7 @@ static bool fetchPng(const char *url) {
 
     Serial.printf("GET %s\n", url);
     int httpCode = http.GET();
+    lastHttpCode = httpCode;
 
     if (httpCode != HTTP_CODE_OK) {
         Serial.printf("HTTP error: %d\n", httpCode);
@@ -692,11 +694,192 @@ static ConfirmResult confirmFactoryReset() {
     return CONFIRM_TIMEOUT;  // user walked away
 }
 
+// ─── debug live-test screen ─────────────────────────────────────────────────
+// A single on-device diagnostic screen: actively connects WiFi and fetches the
+// weather PNG, reporting each step's result. Drawn entirely with FiraSans (no
+// server PNG) so it works precisely when WiFi/server is unreachable. Reuses the
+// normal wake's connectWiFi()/fetchPng() so it exercises the real code path.
+
+enum DebugResult { DEBUG_BACK, DEBUG_TIMEOUT };
+enum WifiState   { WS_PENDING, WS_OK, WS_FAIL, WS_NA };
+enum ServerState { SS_PENDING, SS_OK, SS_HTTPFAIL, SS_NA };
+
+struct DebugInfo {
+    char        idStr[13];
+    char        timeStr[24];
+    const char *ssid;
+    WifiState   wifi;
+    int         rssi;
+    const char *zip;
+    ServerState server;
+    int         httpCode;
+    char        dataTime[24];
+    char        ageStr[16];
+};
+
+// Draws the full debug screen from the current DebugInfo (full refresh). Called
+// repeatedly as the live test progresses; not-yet-known fields show placeholders.
+static void drawDebugScreen(const DebugInfo &d) {
+    memset(framebuffer, 0xFF, EPD_WIDTH * EPD_HEIGHT / 2);
+    char line[80];
+    int32_t x, y;
+
+    // Title + divider (mirrors the menu chrome).
+    x = 60; y = 64;
+    writeln((GFXfont *)&FiraSans, "Debug", &x, &y, framebuffer);
+    epd_fill_rect(60, 92, EPD_WIDTH - 120, 3, OVERLAY_COLOR_MUTED, framebuffer);
+
+    // Device identity.
+    x = 60; y = 150;
+    snprintf(line, sizeof(line), "Device ID: %s", d.idStr);
+    writeln((GFXfont *)&FiraSans, line, &x, &y, framebuffer);
+
+    x = 60; y = 196;
+    snprintf(line, sizeof(line), "Software version: v%d", FIRMWARE_VERSION);
+    writeln((GFXfont *)&FiraSans, line, &x, &y, framebuffer);
+
+    x = 60; y = 242;
+    snprintf(line, sizeof(line), "Device time: %s", d.timeStr);
+    writeln((GFXfont *)&FiraSans, line, &x, &y, framebuffer);
+
+    // WiFi.
+    x = 60; y = 308;
+    if (d.wifi == WS_NA) {
+        snprintf(line, sizeof(line), "WiFi: (not configured)");
+    } else {
+        char wbuf[40];
+        const char *ws;
+        switch (d.wifi) {
+            case WS_OK:   snprintf(wbuf, sizeof(wbuf), "connected, %d dBm", d.rssi);
+                          ws = wbuf; break;
+            case WS_FAIL: ws = "failed to connect"; break;
+            default:      ws = "connecting..."; break;
+        }
+        snprintf(line, sizeof(line), "WiFi: %s  (%s)", d.ssid, ws);
+    }
+    writeln((GFXfont *)&FiraSans, line, &x, &y, framebuffer);
+
+    // Weather.
+    x = 60; y = 374;
+    snprintf(line, sizeof(line), "Weather location: %s",
+             (d.zip && d.zip[0]) ? d.zip : "(none)");
+    writeln((GFXfont *)&FiraSans, line, &x, &y, framebuffer);
+
+    x = 60; y = 420;
+    char sbuf[32];
+    const char *ss;
+    switch (d.server) {
+        case SS_OK:       ss = "Yes"; break;
+        case SS_HTTPFAIL: snprintf(sbuf, sizeof(sbuf), "No (HTTP %d)", d.httpCode);
+                          ss = sbuf; break;
+        case SS_NA:       ss = "- (no WiFi)"; break;
+        default:          ss = "checking..."; break;
+    }
+    snprintf(line, sizeof(line), "Weather server accessible: %s", ss);
+    writeln((GFXfont *)&FiraSans, line, &x, &y, framebuffer);
+
+    x = 60; y = 466;
+    if (d.dataTime[0])
+        snprintf(line, sizeof(line), "Weather data: %s  (%s)", d.dataTime, d.ageStr);
+    else
+        snprintf(line, sizeof(line), "Weather data: -");
+    writeln((GFXfont *)&FiraSans, line, &x, &y, framebuffer);
+
+    pushDisplay();
+}
+
+// Captures the device's current local time into buf ("(no time)" if unsynced).
+static void currentTimeStr(char *buf, size_t bufSize) {
+    struct tm ti;
+    if (getLocalTime(&ti, 0))
+        strftime(buf, bufSize, "%Y-%m-%d %H:%M:%S", &ti);
+    else
+        snprintf(buf, bufSize, "(no time)");
+}
+
+// Runs one live-test pass: draw the static screen immediately (WiFi/server show
+// "connecting..."/"checking..." so the user sees the test started), then run
+// the WiFi connect AND the weather fetch, and redraw ONCE when both results are
+// ready. Leaves WiFi disconnected. The fetched PNG is freed here (not
+// displayed) — the post-menu fall-through re-fetches + repaints fresh weather
+// on menu exit.
+static void runDebugPass(const DeviceConfig &cfg, bool hasConfig) {
+    DebugInfo d;
+    memset(&d, 0, sizeof(d));
+    deviceId(d.idStr, sizeof(d.idStr));
+    d.ssid = cfg.ssid.c_str();
+    d.zip  = cfg.zip.c_str();
+    snprintf(d.timeStr, sizeof(d.timeStr), "...");
+
+    if (!hasConfig) {
+        // Nothing to test — show identity + "not configured" and bail.
+        d.wifi   = WS_NA;
+        d.server = SS_NA;
+        currentTimeStr(d.timeStr, sizeof(d.timeStr));
+        drawDebugScreen(d);
+        return;
+    }
+
+    // First draw (immediate): static fields + "connecting..."/"checking..."
+    // placeholders, so the user gets instant feedback that the test started.
+    d.wifi   = WS_PENDING;
+    d.server = SS_PENDING;
+    drawDebugScreen(d);
+
+    // Run both tests — WiFi connect, then the weather fetch — before redrawing.
+    // The screen updates once, when both results are ready.
+    bool wifiOk = connectWiFi(cfg.ssid.c_str(), cfg.password.c_str());
+    currentTimeStr(d.timeStr, sizeof(d.timeStr));
+    if (wifiOk) {
+        d.wifi = WS_OK;
+        d.rssi = WiFi.RSSI();
+
+        String url = String(SERVER_BASE_URL) + "/weather/" + cfg.zip + ".png";
+        bool fetchOk = fetchPng(url.c_str());
+        if (fetchOk) {
+            d.server = SS_OK;
+            strncpy(d.dataTime, updatedStr, sizeof(d.dataTime) - 1);
+            int ageMin = getAgeMinutes(updatedStr);
+            if (ageMin < 0)        snprintf(d.ageStr, sizeof(d.ageStr), "age unknown");
+            else if (ageMin < 60)  snprintf(d.ageStr, sizeof(d.ageStr), "%dm ago", ageMin);
+            else                   snprintf(d.ageStr, sizeof(d.ageStr), "%dh %dm ago",
+                                            ageMin / 60, ageMin % 60);
+            // Diagnostic only: free the buffer rather than display it. The
+            // post-menu fall-through re-fetches + repaints fresh weather on exit.
+            if (pngBuf) { free(pngBuf); pngBuf = nullptr; pngLen = 0; }
+        } else {
+            d.server   = SS_HTTPFAIL;
+            d.httpCode = lastHttpCode;
+        }
+        disconnectWiFi();
+    } else {
+        d.wifi   = WS_FAIL;
+        d.server = SS_NA;
+    }
+
+    // Second draw: both results together.
+    drawDebugScreen(d);
+}
+
+// Debug live-test screen. Runs a pass, then waits: any press (short or long)
+// returns to the menu, idle exits home (matches the menu idle rule). Assumes
+// the framebuffer is already allocated.
+static DebugResult runDebugScreen(const DeviceConfig &cfg, bool hasConfig) {
+    runDebugPass(cfg, hasConfig);
+
+    unsigned long start = millis();
+    while (millis() - start < MENU_IDLE_TIMEOUT_MS) {
+        if (readButtonEvent() != BTN_NONE) return DEBUG_BACK;  // any press → menu
+        delay(20);
+    }
+    return DEBUG_TIMEOUT;  // idle → home
+}
+
 // On-device menu. Short press cycles the cursor, long press selects. Returns on
-// "Exit menu" or after MENU_IDLE_TIMEOUT_MS of inactivity. Device setup and
-// Factory reset are wired; Debug mode is still a placeholder. Assumes the
-// framebuffer is already allocated.
-static void enterMenuMode() {
+// "Exit menu" or after MENU_IDLE_TIMEOUT_MS of inactivity. Device setup, Debug
+// mode, and Factory reset are wired. Assumes the framebuffer is already
+// allocated; cfg/hasConfig are passed through to the debug live test.
+static void enterMenuMode(const DeviceConfig &cfg, bool hasConfig) {
     Serial.println("=== Entering menu mode ===");
     pinMode(BUTTON_GPIO, INPUT_PULLUP);
 
@@ -751,7 +934,18 @@ static void enterMenuMode() {
                     renderMenu(selected);
                     break;
                 }
-                default:  // MENU_DEBUG (and any future not-yet-wired item)
+                case MENU_DEBUG: {
+                    Serial.println("Menu: entering debug live test.");
+                    DebugResult dr = runDebugScreen(cfg, hasConfig);
+                    if (dr == DEBUG_TIMEOUT) {
+                        Serial.println("Debug idle timeout — exiting menu.");
+                        return;  // idle → go home (weather / splash)
+                    }
+                    Serial.println("Debug: back to menu.");
+                    renderMenu(selected);  // active back → redraw menu
+                    break;
+                }
+                default:  // any future not-yet-wired item
                     showComingSoon();
                     renderMenu(selected);
                     break;
@@ -880,9 +1074,9 @@ void setup() {
         Serial.println("Long-press: opening on-device menu.");
 
         // Navigable menu: short press cycles the cursor, long press selects.
-        // Returns on "Exit menu" or after an idle timeout. Increment 1 wires
-        // only Exit; the other items show a "coming soon" placeholder.
-        enterMenuMode();
+        // Returns on "Exit menu" or after an idle timeout. Device setup, Debug
+        // mode, and Factory reset are wired; cfg/hasConfig feed the debug test.
+        enterMenuMode(cfg, hasConfig);
 
         if (hasConfig) {
             // Return to weather. The menu is currently on screen, so force a
