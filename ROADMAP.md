@@ -6,23 +6,22 @@ Rough priority order within each section.
 
 ## Firmware (device)
 
-### On-device button menu
-Replace the current single-gesture model on the IO21 user button (tap = ignored,
-long-press = setup) with a scrollable on-device menu: tap to cycle options,
-long-press to select. The menu renders on the e-paper itself (no companion app or
-web page) — its main value is visibility when WiFi or the server is unreachable.
+### On-device button menu — 🚧 In progress (PR #4)
+Replaces the single-gesture IO21 model (tap = ignored, long-press = setup) with a
+button-operated menu on the e-paper: long-press opens it, short press cycles a
+cursor, long press selects, and idle returns home (weather if configured, else the
+onboarding splash). Rendered on-device (no companion app) — its main value is
+visibility when WiFi or the server is unreachable.
 
-Planned options:
-- **Live test** — actively run WiFi connect → server connect → data fetch and
-  report each step's result on screen.
-- **Debug logs** — a short persisted history of recent fetch attempts (time, WiFi
-  result, HTTP code, age) plus live diagnostics (RSSI, fail counts, last-good fetch).
-- **Setup mode** — re-enter the existing QR-code captive-portal onboarding
-  (currently button-driven; folding it into the menu needs new UX).
-- **Factory reset.**
-
-Open questions: navigation feel given slow/flashy e-paper refresh, menu timeout,
-and whether to pre-render static menu chrome as PNGs vs draw it on-device.
+Wired so far: **Exit**, **Device setup** (the existing captive-portal onboarding),
+and **Factory reset** (with a confirmation step). Remaining:
+- **Debug mode** — *Live test* (WiFi → server → fetch, reporting each step on screen)
+  and *Debug logs* (a persisted history of recent fetch attempts + live diagnostics
+  like RSSI, fail counts, last-good fetch). Drawn on-device since it matters most when
+  offline. Likely the point to extract the menu into its own `menu.cpp`.
+- **Partial-refresh cursor** — the cursor currently does a full-screen refresh per move.
+- **Setup-screen text rework** (the splash doubles as the onboarding and setup-QR
+  screen) and a broader **menu-flow / back-out UX** pass.
 
 ### Status iconography below the weather
 Replace the single staleness *time* badge ("33m") with a set of small *binary*
@@ -38,33 +37,23 @@ decision gates the rest of the redesign. Fixing the staleness badge so it reliab
 clears once data is fresh again is folded into this work rather than patched
 separately.
 
-### OTA (over-the-air) firmware updates
-Let the device pull and flash new firmware from the worker over WiFi, so a gifted
-device can be updated without physical access.
+### OTA (over-the-air) firmware updates — ✅ Shipped
+The device pulls and flashes new firmware from the worker over WiFi — validated
+end-to-end (a device self-updated v1→v2 over the air). Fast/slow release channels
+are resolved server-side by chip ID, so each release can be canaried on your own
+device before it reaches gifted ("slow") devices. Release flow + scripts are in
+`docs/ota.md` and `firmware/scripts/ota-{publish,promote,add-fast-device}.sh`.
 
-- The flash is already on an OTA-capable dual-slot layout (`app0`/`app1`/`otadata`),
-  with ~3.3 MB slots vs ~1.15 MB firmware — no repartitioning needed.
-- High-level tasks:
-  1. **Device OTA codepath** — add a `FIRMWARE_VERSION`, wire up Arduino
-     `HTTPUpdate`, reboot on success. Must be flashed once over USB *before gifting*,
-     since the current firmware has no OTA code.
-  2. **Worker endpoints** — report the latest version and serve the binary (R2 or KV).
-  3. **Throttled version-check** on wake (e.g. once/day); update if newer.
-  4. **Release workflow** — build `.bin`, upload, bump the version.
-  5. **Harden for unattended devices** — rollback protection, battery guard, TLS cert
-     validation on the OTA path, optionally signed images.
-- **TODO — migrate binary storage from KV to R2.** The binary is currently stored in
-  Cloudflare KV (`firmware:bin:{version}`, ~1.1 MB, within KV's 25 MB/value limit) as an
-  interim measure because R2 wasn't enabled on the account. Move it to a dedicated R2
-  bucket (`weather-esp32-firmware`) once R2 is available — purpose-built for blobs,
-  strong consistency, easier to list/manage versions. The device-facing
-  `/firmware/{version}.bin` URL stays the same, so only the worker's read and the
-  `ota-publish.sh` upload change.
-
-### Self-serve splash on unconfigured / offline boot
-The splash PNG is rendered and committed (`worker/renderer/splash.png`); still need
-firmware to display it on no-network / unconfigured boot. Waiting on device
-availability for debugging.
+Follow-ups:
+- **Migrate binary storage from KV to R2.** The binary currently lives in Cloudflare
+  KV (`firmware:bin:{version}`, ~1.1 MB) as an interim measure — R2 wasn't enabled on
+  the account. Move it to a dedicated R2 bucket (`weather-esp32-firmware`) once R2 is
+  available; the device-facing `/firmware/{version}.bin` URL is unchanged, so only the
+  worker's read and the `ota-publish.sh` upload change.
+- **Piggyback the version check on the weather fetch.** The device already fetches the
+  weather PNG every wake; adding the channel-resolved latest version as a header on that
+  response would let it discover new builds for free — dropping the separate
+  `/firmware/check` request (and probably the once/day throttle).
 
 ### Smaller items
 - **Battery life** — consider raising the device poll interval (`SLEEP_MINUTES`,
