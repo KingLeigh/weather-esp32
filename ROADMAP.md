@@ -14,13 +14,15 @@ onboarding splash). Rendered on-device (no companion app) — its main value is
 visibility when WiFi or the server is unreachable.
 
 Shipped: **Exit**, **Device setup** (the existing captive-portal onboarding),
-**Factory reset** (with a confirmation step), and **Debug mode → Live test**
+**Factory reset** (with a confirmation step), **Debug mode → Live test**
 (actively runs WiFi → server → fetch and reports each result on-screen, including
-the firmware version with "up to date" / "update available"). Remaining:
+the firmware version with "up to date" / "update available"), and a
+**partial-refresh cursor** (a move repaints only the cursor column instead of the
+whole screen, with a full refresh on wrap-to-top to clear e-paper ghosting).
+Remaining:
 - **Debug logs** — a persisted history of recent fetch attempts + live diagnostics
   (RSSI, fail counts, last-good fetch). Drawn on-device since it matters most when
   offline. Likely the point to extract the menu into its own `menu.cpp`.
-- **Partial-refresh cursor** — the cursor currently does a full-screen refresh per move.
 - **Setup-screen text rework** (the splash doubles as the onboarding and setup-QR
   screen) and a broader **menu-flow / back-out UX** pass.
 
