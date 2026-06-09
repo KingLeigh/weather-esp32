@@ -5,6 +5,10 @@
 # fast channel; everyone else waits for ota-promote.sh to move it to slow.
 # Use this for your own test device(s).
 #
+# NOTE: only the legacy /firmware/check path consults this allowlist. Current
+# (piggyback-discovery) firmware reads the fast channel straight off the weather
+# header regardless, so a device on current firmware needn't be listed here.
+#
 # Usage: ota-add-fast-device.sh {deviceId}
 #
 #   deviceId  The device's chip ID — ESP.getEfuseMac() as lowercase 12-char

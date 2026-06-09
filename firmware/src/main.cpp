@@ -92,18 +92,10 @@ enum MenuItem {
 // Staleness threshold: show "Xm ago" / "Xh Ym ago" if data is older than this.
 #define STALE_THRESHOLD_MIN  30
 
-// OTA update check cadence. We only poll the worker's /firmware/check endpoint
-// once per this interval (not every wake) to keep the battery hit negligible.
-// 86400s = once per day. A failed check/update waits a full interval to retry
-// (prev_ota_check is stamped before the attempt), avoiding per-wake retry storms.
-//
-// OTA_TEST_MODE (build flag — env firmware-ota-test) drops the interval to 0 so
-// the device checks on EVERY wake, for fast OTA iteration. Don't ship it.
-#ifdef OTA_TEST_MODE
-#define OTA_CHECK_INTERVAL_S  0
-#else
-#define OTA_CHECK_INTERVAL_S  86400
-#endif
+// OTA updates are discovered for free: the worker advertises the latest
+// available firmware version on every weather response (X-Firmware-Latest),
+// which fetchPng() captures into latestFirmwareAvail. No separate
+// /firmware/check request and no once-a-day throttle — see applyOtaUpdate().
 
 // Battery: skip display refresh if battery changed less than this.
 #define BATTERY_TOLERANCE    10
@@ -126,9 +118,10 @@ RTC_DATA_ATTR static uint32_t boot_count          = 0;
 // re-flash the same splash on every wake (visible refresh + power cost).
 // Cleared whenever we successfully render weather.
 RTC_DATA_ATTR static bool     splash_already_drawn = false;
-// Wall-clock time (epoch seconds) of the last OTA version check. 0 = never
-// checked. Throttles the check to OTA_CHECK_INTERVAL_S; see checkForOtaUpdate().
-RTC_DATA_ATTR static time_t   prev_ota_check       = 0;
+// Firmware version that an OTA flash last failed on. Set after a failed
+// httpUpdate so we don't re-download the same broken build on every wake; a
+// newer advertised version or a power cycle (clears RTC) re-enables the attempt.
+RTC_DATA_ATTR static int      ota_failed_version   = 0;
 
 // ─── globals (re-initialized every wake) ─────────────────────────────────────
 
@@ -141,6 +134,7 @@ static uint8_t  *pngBuf     = nullptr;
 static int32_t   pngLen     = 0;
 static char      updatedStr[32] = {0};  // X-Updated header value
 static int       lastHttpCode   = 0;    // HTTP status from the last fetchPng()
+static int       latestFirmwareAvail = 0;  // X-Firmware-Latest from the weather fetch
 
 // ─── simple hash (djb2) ─────────────────────────────────────────────────────
 
@@ -255,65 +249,19 @@ static void deviceId(char *buf, size_t bufSize) {
 }
 
 // ─── OTA firmware update ─────────────────────────────────────────────────────
-// Asks the worker whether a newer firmware build is available for this device's
-// channel, and if so streams it straight into the inactive OTA slot and reboots.
+// Downloads firmware version `latestVersion` from the worker and flashes it into
+// the inactive OTA slot. Must be called with WiFi up. On success the chip reboots
+// into the new slot and this never returns; returns false on failure so the
+// caller can record the bad version and avoid re-downloading it every wake.
 //
-// Must be called with WiFi up and NTP synced. Throttled to OTA_CHECK_INTERVAL_S
-// via prev_ota_check (stamped before the attempt so a failure waits a full
-// interval). On a successful update the chip reboots into the new slot and this
-// never returns; otherwise it logs and returns so the normal weather flow runs.
-static void checkForOtaUpdate() {
-    time_t now;
-    if (time(&now) == (time_t)-1 || now <= 0) {
-        // No valid wall clock (NTP didn't sync) — can't safely throttle; skip.
-        Serial.println("OTA: no valid time, skipping check.");
-        return;
-    }
-    if (prev_ota_check != 0 && (now - prev_ota_check) < OTA_CHECK_INTERVAL_S) {
-        Serial.printf("OTA: last check %lds ago (< %ds) — skipping.\n",
-                      (long)(now - prev_ota_check), OTA_CHECK_INTERVAL_S);
-        return;
-    }
-    // Stamp before attempting so a failed check/update waits a full interval
-    // rather than retrying on every wake.
-    prev_ota_check = now;
-
-    char id[13];
-    deviceId(id, sizeof(id));
-
-    String checkUrl = String(SERVER_BASE_URL) + "/firmware/check?current="
-                      + FIRMWARE_VERSION;
-
-    WiFiClientSecure client;
-    client.setInsecure();
-
-    HTTPClient http;
-    http.begin(client, checkUrl);
-    http.setTimeout(15000);
-    http.setConnectTimeout(10000);
-    http.addHeader("X-Device-Id", id);
-
-    const char *headerKeys[] = {"X-Firmware-Url"};
-    http.collectHeaders(headerKeys, 1);
-
-    Serial.printf("OTA: GET %s (X-Device-Id: %s)\n", checkUrl.c_str(), id);
-    int httpCode = http.GET();
-    if (httpCode != HTTP_CODE_OK) {
-        Serial.printf("OTA: check HTTP error: %d\n", httpCode);
-        http.end();
-        return;
-    }
-
-    String fwUrl = http.header("X-Firmware-Url");
-    http.end();
-
-    if (fwUrl.length() == 0) {
-        Serial.println("OTA: up to date (no X-Firmware-Url).");
-        return;
-    }
-
-    String url = String(SERVER_BASE_URL) + fwUrl;
-    Serial.printf("OTA: update available, downloading %s\n", url.c_str());
+// Discovery is free: the worker advertises the latest available version on every
+// weather response (X-Firmware-Latest, captured by fetchPng), so there's no
+// separate /firmware/check request or once-a-day throttle. The /firmware/check
+// endpoint still exists for manual/explicit checks.
+static bool applyOtaUpdate(int latestVersion) {
+    String url = String(SERVER_BASE_URL) + "/firmware/" + latestVersion + ".bin";
+    Serial.printf("OTA: v%d > v%d — downloading %s\n",
+                  latestVersion, FIRMWARE_VERSION, url.c_str());
 
     WiFiClientSecure secureClient;
     secureClient.setInsecure();
@@ -328,16 +276,16 @@ static void checkForOtaUpdate() {
             Serial.println("OTA: update OK — rebooting into new firmware.");
             Serial.flush();
             ESP.restart();
-            break;
+            return true;  // not reached
         case HTTP_UPDATE_NO_UPDATES:
-            Serial.println("OTA: no updates (server reported none).");
-            break;
+            Serial.println("OTA: server reported no update.");
+            return false;
         case HTTP_UPDATE_FAILED:
         default:
             Serial.printf("OTA: update FAILED (%d): %s\n",
                           httpUpdate.getLastError(),
                           httpUpdate.getLastErrorString().c_str());
-            break;
+            return false;
     }
 }
 
@@ -447,8 +395,8 @@ static bool fetchPng(const char *url) {
     http.setTimeout(15000);
     http.setConnectTimeout(10000);
 
-    const char *headerKeys[] = {"X-Updated"};
-    http.collectHeaders(headerKeys, 1);
+    const char *headerKeys[] = {"X-Updated", "X-Firmware-Latest"};
+    http.collectHeaders(headerKeys, 2);
 
     Serial.printf("GET %s\n", url);
     int httpCode = http.GET();
@@ -465,6 +413,12 @@ static bool fetchPng(const char *url) {
     strncpy(updatedStr, hdr.c_str(), sizeof(updatedStr) - 1);
     updatedStr[sizeof(updatedStr) - 1] = '\0';
     Serial.printf("X-Updated: %s\n", updatedStr);
+
+    // Capture X-Firmware-Latest — the newest firmware version available to this
+    // device. Drives free OTA discovery (see the OTA step in setup()).
+    latestFirmwareAvail = http.header("X-Firmware-Latest").toInt();
+    Serial.printf("X-Firmware-Latest: %d (running v%d)\n",
+                  latestFirmwareAvail, FIRMWARE_VERSION);
 
     // Read body into PSRAM.
     int32_t contentLen = http.getSize();
@@ -713,6 +667,7 @@ struct DebugInfo {
     const char *zip;
     ServerState server;
     int         httpCode;
+    int         latestFw;    // X-Firmware-Latest this pass (valid iff server==SS_OK)
     char        dataTime[24];
     char        ageStr[16];
 };
@@ -735,7 +690,19 @@ static void drawDebugScreen(const DebugInfo &d) {
     writeln((GFXfont *)&FiraSans, line, &x, &y, framebuffer);
 
     x = 60; y = 196;
-    snprintf(line, sizeof(line), "Software version: v%d", FIRMWARE_VERSION);
+    // Append the OTA status once the server has responded (a successful fetch
+    // carries X-Firmware-Latest). Lets you see at a glance whether the device
+    // thinks it's current — a persistent "(update available)" across debug runs
+    // means it's discovering updates but not applying them.
+    // TODO: surface OTA *failure* detail here in future — e.g. when
+    // ota_failed_version is set, show "(update FAILED: vN)" plus the last
+    // httpUpdate error, so a stuck/looping OTA is visible on-device.
+    if (d.server == SS_OK) {
+        snprintf(line, sizeof(line), "Software version: v%d (%s)", FIRMWARE_VERSION,
+                 d.latestFw > FIRMWARE_VERSION ? "update available" : "up to date");
+    } else {
+        snprintf(line, sizeof(line), "Software version: v%d", FIRMWARE_VERSION);
+    }
     writeln((GFXfont *)&FiraSans, line, &x, &y, framebuffer);
 
     x = 60; y = 242;
@@ -838,6 +805,7 @@ static void runDebugPass(const DeviceConfig &cfg, bool hasConfig) {
         bool fetchOk = fetchPng(url.c_str());
         if (fetchOk) {
             d.server = SS_OK;
+            d.latestFw = latestFirmwareAvail;
             strncpy(d.dataTime, updatedStr, sizeof(d.dataTime) - 1);
             int ageMin = getAgeMinutes(updatedStr);
             if (ageMin < 0)        snprintf(d.ageStr, sizeof(d.ageStr), "age unknown");
@@ -1119,12 +1087,9 @@ void setup() {
     bool fetchOk = false;
     if (connectWiFi(cfg.ssid.c_str(), cfg.password.c_str())) {
         fetchOk = fetchPng(pngUrl.c_str());
-        // OTA check while WiFi is up + NTP is synced. Throttled internally to
-        // once per OTA_CHECK_INTERVAL_S. On a successful update this reboots
-        // into the new slot and never returns; otherwise it falls through to
-        // the normal weather display + deep sleep.
-        checkForOtaUpdate();
-        disconnectWiFi();
+        // Leave WiFi up: the OTA step runs after the weather is on screen
+        // (further down) so the device shows fresh weather before any firmware
+        // download/reboot.
     } else {
         Serial.println("WiFi failed");
     }
@@ -1172,6 +1137,21 @@ void setup() {
 
     // Free PNG buffer before sleep.
     if (pngBuf) { free(pngBuf); pngBuf = nullptr; pngLen = 0; }
+
+    // ── OTA update (piggybacked on the weather fetch) ────────────────────
+    // The worker advertises the latest firmware version on every weather
+    // response (X-Firmware-Latest → latestFirmwareAvail). If it's newer than
+    // what we're running, flash it now — after the weather is on screen, while
+    // WiFi is still up. A just-failed version is skipped so a bad build doesn't
+    // re-download every wake. applyOtaUpdate() reboots into the new slot on
+    // success (never returns).
+    if (fetchOk && latestFirmwareAvail > FIRMWARE_VERSION
+                && latestFirmwareAvail != ota_failed_version) {
+        if (!applyOtaUpdate(latestFirmwareAvail)) {
+            ota_failed_version = latestFirmwareAvail;
+        }
+    }
+    disconnectWiFi();
 
     // Shorter retry interval if we couldn't fetch — recover from transient
     // WiFi/server outages quickly, without burning extra battery on the

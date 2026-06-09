@@ -2,8 +2,11 @@
 
 The ESP32 weather display can pull and flash new firmware over WiFi, so a
 gifted device never needs to be plugged in again. The Cloudflare Worker serves
-the firmware binary; the device polls a release **channel** and self-updates
-when a newer version is available.
+the firmware binary and advertises the latest available version on every weather
+response (`X-Firmware-Latest`); the device reads that header on each wake and
+self-updates — right after rendering the weather — when a newer version is
+available. (See the **Update discovery** note below for how this relates to the
+release **channels** described next.)
 
 There are two channels:
 
@@ -15,6 +18,22 @@ Which channel a device follows is resolved by its **chip ID** (`ESP.getEfuseMac(
 as a lowercase 12-char hex string). A device whose chip ID is in the
 `firmware:fast_devices` allowlist follows the fast channel; all others follow
 slow.
+
+> **Update discovery (current firmware).** The device no longer polls
+> `/firmware/check`. Instead the worker advertises the latest available version
+> on **every weather response** via the `X-Firmware-Latest` header, and the
+> device self-updates after rendering the weather if that version is newer than
+> its own. Discovery is therefore free (no extra request) and effectively every
+> wake.
+>
+> For now this **skips chip-ID channel resolution**: the header always reports
+> the **fast** channel version, so every updated device tracks fast. The
+> fast/slow split and `firmware:fast_devices` still exist server-side and still
+> govern the legacy `/firmware/check` endpoint (used by pre-piggyback firmware
+> to bootstrap onto this build), but current firmware ignores them. Practical
+> effect: **`ota-promote.sh` (fast → slow) no longer gates current devices** —
+> they update as soon as you publish to fast. Re-introducing per-device channels
+> on the weather header is a future item (see `ROADMAP.md`).
 
 ## How it's stored
 
@@ -35,7 +54,7 @@ The single source of truth for the version number is
 `firmware/src/config.h`:
 
 ```c
-inline constexpr int FIRMWARE_VERSION = 1;
+inline constexpr int FIRMWARE_VERSION = 3;
 ```
 
 Bump this integer (monotonically) for every release. `ota-publish.sh` reads it.

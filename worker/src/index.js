@@ -326,13 +326,19 @@ async function handleFirmwareCheck(request, env, url) {
 
 async function serveWeatherPng(env, loc) {
   try {
-    const [cachedPng, cachedUpdated] = await Promise.all([
+    const [cachedPng, cachedUpdated, fwLatest] = await Promise.all([
       env.WEATHER_KV.get(`render_png:${loc.zip}`, 'arrayBuffer'),
       env.WEATHER_KV.get(`render_updated:${loc.zip}`, 'text'),
+      // Latest available firmware (fast channel) — advertised on every weather
+      // response so the device discovers OTA updates for free. Channels are
+      // skipped for now: every device is treated as "fast".
+      env.WEATHER_KV.get('firmware:channel:fast', 'text'),
     ]);
 
+    const firmwareLatest = parseInt(fwLatest, 10) || 0;
+
     if (cachedPng) {
-      return pngResponse(cachedPng, cachedUpdated || '');
+      return pngResponse(cachedPng, cachedUpdated || '', firmwareLatest);
     }
 
     // Cache miss — render on demand.
@@ -342,7 +348,7 @@ async function serveWeatherPng(env, loc) {
       env.WEATHER_KV.put(`render_png:${loc.zip}`, png, { expirationTtl: KV_TTL }),
       env.WEATHER_KV.put(`render_updated:${loc.zip}`, weatherData.updated, { expirationTtl: KV_TTL }),
     ]);
-    return pngResponse(png, weatherData.updated);
+    return pngResponse(png, weatherData.updated, firmwareLatest);
   } catch (error) {
     return new Response(`Render failed: ${error.message}`, { status: 500 });
   }
@@ -381,11 +387,15 @@ function jsonResponse(data, status = 200) {
   });
 }
 
-function pngResponse(pngBytes, updated) {
+function pngResponse(pngBytes, updated, firmwareLatest = 0) {
   return new Response(pngBytes, {
     headers: {
       'Content-Type': 'image/png',
       'X-Updated': updated,
+      // Latest firmware version available to this device (fast channel). The
+      // device compares it to its own FIRMWARE_VERSION and self-updates if newer
+      // — free OTA discovery, no separate /firmware/check request needed.
+      'X-Firmware-Latest': String(firmwareLatest),
       'Cache-Control': 'public, max-age=300',
       'Access-Control-Allow-Origin': '*',
     },
