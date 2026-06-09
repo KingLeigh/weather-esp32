@@ -65,6 +65,18 @@
 #define MENU_CURSOR_X        50     // left x (px) of the cursor arrow
 #define MENU_CURSOR_W        34     // arrow width (px)
 #define MENU_CURSOR_H        40     // arrow height (px)
+// Partial-refresh cursor box: on a cursor move the arrow is erased/redrawn
+// inside this byte-aligned box instead of repainting the whole 960×540 screen.
+// x and width MUST be even so the packed 4bpp sub-buffer (2 px/byte) extracts on
+// clean byte boundaries. Sized to contain the arrow + a small margin.
+#define MENU_CURSOR_BOX_X    (MENU_CURSOR_X - 4)   // 46 (even)
+#define MENU_CURSOR_BOX_W    (MENU_CURSOR_W + 8)   // 42 (even)
+#define MENU_CURSOR_BOX_H    (MENU_CURSOR_H + 8)   // 48
+// Erase flash for the old cursor box: number of black↔white clear cycles. The
+// library default is 4 — the main per-move flicker source. Fewer = less flicker
+// but more ghost residue left behind (1 = minimum that still erases). Tunable:
+// raise toward 2–4 if residue is too heavy.
+#define MENU_CURSOR_CLEAR_CYCLES  1
 #define MENU_IDLE_TIMEOUT_MS 30000  // auto-exit the menu after this much inactivity
 #define MENU_CONFIRM_TIMEOUT_MS 15000  // factory-reset confirm auto-cancels after this
 
@@ -572,8 +584,28 @@ void renderSplash(const char *wifiJoinStr) {
 
 // ─── on-device menu ─────────────────────────────────────────────────────────
 
-// Renders the bundled menu PNG with the cursor arrow at the selected row.
-// Full-screen refresh (increment 1; a partial-refresh cursor is a later step).
+// Draws the cursor arrow (right-pointing triangle) for menu row `i` into the
+// framebuffer, in the white column left of the item text. No display update.
+// Row centre matches menu.jsx.
+static void drawCursorIntoFb(int i) {
+    int32_t cy = MENU_ROW_Y0 + i * MENU_ROW_DY;
+    epd_fill_triangle(MENU_CURSOR_X,                 cy - MENU_CURSOR_H / 2,
+                      MENU_CURSOR_X,                 cy + MENU_CURSOR_H / 2,
+                      MENU_CURSOR_X + MENU_CURSOR_W, cy,
+                      0x00, framebuffer);
+}
+
+// Byte-aligned box around the cursor arrow for row `i` (used for partial refresh).
+static Rect_t cursorBox(int i) {
+    int32_t cy = MENU_ROW_Y0 + i * MENU_ROW_DY;
+    Rect_t r = { MENU_CURSOR_BOX_X, cy - MENU_CURSOR_BOX_H / 2,
+                 MENU_CURSOR_BOX_W, MENU_CURSOR_BOX_H };
+    return r;
+}
+
+// Renders the bundled menu PNG with the cursor arrow at `selectedIndex` via a
+// full-screen refresh. Used on menu entry and as the periodic ghosting-clearing
+// refresh; cursor *moves* use moveCursorPartial() instead.
 static void renderMenu(int selectedIndex) {
     int rc = png.openRAM((uint8_t *)menu_png, menu_png_len, png_draw_callback);
     if (rc != PNG_SUCCESS) {
@@ -587,15 +619,46 @@ static void renderMenu(int selectedIndex) {
         return;
     }
 
-    // Cursor arrow (right-pointing triangle) at the selected row's centre, in
-    // the white column left of the item text. Row centre matches menu.jsx.
-    int32_t cy = MENU_ROW_Y0 + selectedIndex * MENU_ROW_DY;
-    epd_fill_triangle(MENU_CURSOR_X,                 cy - MENU_CURSOR_H / 2,
-                      MENU_CURSOR_X,                 cy + MENU_CURSOR_H / 2,
-                      MENU_CURSOR_X + MENU_CURSOR_W, cy,
-                      0x00, framebuffer);
-
+    drawCursorIntoFb(selectedIndex);
     pushDisplay();
+}
+
+// Moves the cursor from oldIndex to newIndex with a PARTIAL refresh: erase the
+// old arrow's box (a localized white flash) and blit the new arrow's box, rather
+// than repainting all 960×540. The framebuffer is kept authoritative so the
+// periodic full renderMenu() (which clears accrued ghosting) stays correct.
+//
+// epd_draw_grayscale_image() wants a tightly-packed 4bpp buffer (row stride =
+// width/2, no framebuffer stride), so we extract the new box from the full
+// framebuffer first; MENU_CURSOR_BOX_X/W are even, so each row is a clean
+// byte-aligned memcpy. The new box is white background before drawing (the only
+// dark pixels there were the old arrow, which lives in a different row), so the
+// blit needs no clear of its own.
+static uint8_t cursorSubBuf[(MENU_CURSOR_BOX_W / 2) * MENU_CURSOR_BOX_H];
+
+static void moveCursorPartial(int oldIndex, int newIndex) {
+    Rect_t oldBox = cursorBox(oldIndex);
+    Rect_t newBox = cursorBox(newIndex);
+
+    // Keep the framebuffer in sync: clear the old arrow, draw the new one.
+    epd_fill_rect(oldBox.x, oldBox.y, oldBox.width, oldBox.height, 0xFF, framebuffer);
+    drawCursorIntoFb(newIndex);
+
+    // Extract the new box as a packed sub-buffer (two pixels per byte).
+    const int32_t stride = newBox.width / 2;
+    for (int32_t row = 0; row < newBox.height; row++) {
+        const uint8_t *src =
+            framebuffer + (newBox.y + row) * (EPD_WIDTH / 2) + newBox.x / 2;
+        memcpy(cursorSubBuf + row * stride, src, stride);
+    }
+
+    epd_poweron();
+    // Low-cycle erase of the old arrow — fewer black↔white flashes than the
+    // default epd_clear_area (4 cycles); the leftover residue is wiped by the
+    // periodic full refresh.
+    epd_clear_area_cycles(oldBox, MENU_CURSOR_CLEAR_CYCLES, 50);
+    epd_draw_grayscale_image(newBox, cursorSubBuf);  // blit new arrow
+    epd_poweroff();
 }
 
 // Brief placeholder shown when an unimplemented menu item is selected
@@ -879,9 +942,18 @@ static void enterMenuMode(const DeviceConfig &cfg, bool hasConfig) {
         }
         lastActivity = millis();
         if (ev == BTN_SHORT) {
+            int prev = selected;
             selected = (selected + 1) % MENU_ITEM_COUNT;
             Serial.printf("Menu: cursor -> item %d\n", selected);
-            renderMenu(selected);
+            // Partial refresh for snappy moves; do a full refresh whenever the
+            // cursor wraps back to the top (selected == 0). For a 4-item menu
+            // that's once per cycle — a natural moment for the full-screen flash,
+            // and it bounds ghosting to the partial moves before the wrap.
+            if (selected == 0) {
+                renderMenu(selected);
+            } else {
+                moveCursorPartial(prev, selected);
+            }
         } else {  // BTN_LONG — select
             Serial.printf("Menu: select item %d\n", selected);
             switch (selected) {
