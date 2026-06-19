@@ -1224,16 +1224,14 @@ void setup() {
         Serial.println("No NVS config — device not yet set up.");
     }
 
-    // ── Menu entry (long-press) ──────────────────────────────────────────
+    // ── Long-press entry: setup (unconfigured) or menu (configured) ──────
     if (wantMenu) {
-        Serial.println("Long-press: opening on-device menu.");
-
-        // Navigable menu: short press cycles the cursor, long press selects.
-        // Returns on "Exit menu" or after an idle timeout. Device setup, Debug
-        // mode, and Factory reset are wired; cfg/hasConfig feed the debug test.
-        enterMenuMode(cfg, hasConfig);
-
         if (hasConfig) {
+            // Configured: open the on-device menu (Device setup / Debug mode /
+            // Factory reset). Short press cycles the cursor, long press selects;
+            // returns on "Exit menu" or an idle timeout.
+            Serial.println("Long-press: opening on-device menu.");
+            enterMenuMode(cfg, hasConfig);
             // Return to weather. The menu is currently on screen, so force a
             // repaint on the next fetch (change detection would otherwise skip
             // it when the fetched PNG matches the previously-displayed weather).
@@ -1241,9 +1239,13 @@ void setup() {
             prev_png_hash = 0;
             // fall through to the weather flow ↓
         } else {
-            // No config yet — return to the onboarding splash, button-only sleep.
-            Serial.println("Menu exited with no config — showing splash.");
-            renderSplash();
+            // Unconfigured: skip the menu and go straight to setup — with no
+            // config it's the only useful screen. enterSetupMode() reboots on a
+            // successful save (never returns); on idle timeout it repaints the
+            // onboarding splash itself and returns, so we just sleep here (a
+            // button-only wake, so the next long-press re-enters setup).
+            Serial.println("Long-press with no config — entering setup directly.");
+            enterSetupMode();
             splash_already_drawn = true;
             enterDeepSleep(/*armTimer=*/false);
             return;

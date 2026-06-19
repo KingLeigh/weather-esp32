@@ -1,6 +1,11 @@
-// Splash screen layout — rendered once locally and saved as a PNG artifact
-// that gets baked into the firmware. Shown on the e-paper when the device has
-// no network connection or hasn't been configured yet.
+// Splash screen layout — a pure brand splash. The setup instructions + QR live
+// on the dedicated setup screen now (setup.jsx); this screen is shown when the
+// device is unconfigured or has fallen back to the splash because of a bad
+// state (e.g. can't reach WiFi with no weather to show).
+//
+// The lower ~120px is deliberately left empty: the firmware draws a contextual
+// status message there on-device (onboarding hint, or the failure reason), so
+// the baked art stays generic.
 //
 // Visual style is intentionally consistent with the live weather frame
 // (layout.jsx): same FiraSans, same FG/BG, same icon font.
@@ -16,19 +21,31 @@ const FG_MUTED = '#333';
 const BG = '#fff';
 
 const PAGE_PADDING_X = 60;
-const COLUMN_GAP = 40;
-const QR_SIZE = 240;
+
+// Height of the bottom strip reserved for the firmware's on-device status
+// message. Keep this clear of the brand block above.
+const MESSAGE_STRIP_H = 100;
+
+// Onboarding instructions baked into the splash — same size as the setup
+// screen's step list (setup.jsx).
+const STEP_FONT = 32;
+const NUM_WIDTH = 38;
+const LIST_WIDTH = 800;
+const SPLASH_STEPS = [
+  'Ensure your device is charged.',
+  'Long press the white button to enter setup mode.',
+];
 
 // Decorative weather-icon strip for the splash. Codepoints are raw Erik
 // Flowers Weather Icons glyphs (same font the live frame uses) — chosen for
 // visual variety across the full range of forecast conditions.
 const DECORATIVE_ICONS = [
-  '\uf00d', // wi_day_sunny
-  '\uf002', // wi_day_cloudy (partly cloudy)
-  '\uf013', // wi_cloudy
-  '\uf019', // wi_rain
-  '\uf01e', // wi_thunderstorm
-  '\uf01b', // wi_snow
+  '', // wi_day_sunny
+  '', // wi_day_cloudy (partly cloudy)
+  '', // wi_cloudy
+  '', // wi_rain
+  '', // wi_thunderstorm
+  '', // wi_snow
 ];
 
 function IconStrip({ size }) {
@@ -59,53 +76,6 @@ function IconStrip({ size }) {
   );
 }
 
-// Square placeholder for the eventual onboarding QR code. Dashed border with
-// a "QR" label so it's visually obvious this is intentional empty space.
-// Once we know what the QR encodes (captive portal URL?), swap this for a
-// real qrcode-svg render.
-function QRPlaceholder({ size }) {
-  return (
-    <div
-      style={{
-        width: size,
-        height: size,
-        position: 'relative',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        flexShrink: 0,
-      }}
-    >
-      <svg
-        width={size}
-        height={size}
-        style={{ position: 'absolute', left: 0, top: 0 }}
-      >
-        <rect
-          x={2}
-          y={2}
-          width={size - 4}
-          height={size - 4}
-          fill="none"
-          stroke={FG_MUTED}
-          strokeWidth={3}
-          strokeDasharray="12 10"
-        />
-      </svg>
-      <div
-        style={{
-          fontSize: 56,
-          fontWeight: 700,
-          color: FG_MUTED,
-          letterSpacing: 4,
-        }}
-      >
-        QR
-      </div>
-    </div>
-  );
-}
-
 export function SplashFrame() {
   return (
     <div
@@ -119,105 +89,91 @@ export function SplashFrame() {
         flexDirection: 'column',
       }}
     >
-      {/* Top: centered title */}
+      {/* Brand block (title + decorative icons), vertically centered in the
+          space above the reserved message strip. */}
       <div
         style={{
           display: 'flex',
-          justifyContent: 'center',
-          padding: `30px ${PAGE_PADDING_X}px 0 ${PAGE_PADDING_X}px`,
-        }}
-      >
-        <div
-          style={{
-            fontSize: 80,
-            fontWeight: 700,
-            color: FG,
-            lineHeight: 1,
-          }}
-        >
-          What's the Weather?
-        </div>
-      </div>
-
-      {/* Decorative weather-icon strip beneath the title. Explicit height
-          so descenders on rain/snow glyphs don't bleed into the bottom row. */}
-      <div
-        style={{
-          display: 'flex',
-          height: 100,
-          padding: `20px ${PAGE_PADDING_X + 30}px 20px ${PAGE_PADDING_X + 30}px`,
-        }}
-      >
-        <IconStrip size={56} />
-      </div>
-
-      {/* Bottom: two columns — instructions on left, QR on right */}
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: 'row',
-          alignItems: 'center',
+          flexDirection: 'column',
           flexGrow: 1,
-          padding: `0 ${PAGE_PADDING_X}px`,
+          justifyContent: 'center',
         }}
       >
-        {/* Left column: instructions */}
+        {/* Title */}
         <div
           style={{
             display: 'flex',
-            flexDirection: 'column',
-            flexGrow: 1,
-            marginRight: COLUMN_GAP,
+            justifyContent: 'center',
+            padding: `0 ${PAGE_PADDING_X}px`,
           }}
         >
           <div
-            style={{
-              fontSize: 32,
-              fontWeight: 600,
-              color: FG_MUTED,
-              lineHeight: 1.1,
-            }}
+            style={{ fontSize: 80, fontWeight: 700, color: FG, lineHeight: 1 }}
           >
-            Setup required:
-          </div>
-          <div
-            style={{
-              fontSize: 32,
-              fontWeight: 700,
-              color: FG,
-              lineHeight: 1.25,
-              marginTop: 14,
-            }}
-          >
-            1. Ensure device is charged
-          </div>
-          <div
-            style={{
-              fontSize: 32,
-              fontWeight: 700,
-              color: FG,
-              lineHeight: 1.25,
-              marginTop: 6,
-            }}
-          >
-            2. Press and hold middle button
-          </div>
-          <div
-            style={{
-              fontSize: 32,
-              fontWeight: 700,
-              color: FG,
-              lineHeight: 1.25,
-              marginTop: 6,
-            }}
-          >
-            3. Scan QR code with phone
+            What's the Weather?
           </div>
         </div>
 
-        {/* Right column: QR placeholder */}
-        <QRPlaceholder size={QR_SIZE} />
+        {/* Decorative weather-icon strip beneath the title. Explicit height so
+            descenders on rain/snow glyphs don't bleed into the row below. */}
+        <div
+          style={{
+            display: 'flex',
+            height: 110,
+            marginTop: 8,
+            padding: `0 ${PAGE_PADDING_X + 30}px`,
+          }}
+        >
+          <IconStrip size={64} />
+        </div>
+
+        {/* Onboarding instructions (centered block, left-aligned items). */}
+        <div style={{ display: 'flex', justifyContent: 'center', marginTop: 36 }}>
+          <div
+            style={{ display: 'flex', flexDirection: 'column', width: LIST_WIDTH }}
+          >
+            {SPLASH_STEPS.map((text, i) => (
+              <div
+                key={i}
+                style={{
+                  display: 'flex',
+                  flexDirection: 'row',
+                  alignItems: 'flex-start',
+                  width: LIST_WIDTH,
+                  marginBottom: i < SPLASH_STEPS.length - 1 ? 16 : 0,
+                }}
+              >
+                <div
+                  style={{
+                    width: NUM_WIDTH,
+                    flexShrink: 0,
+                    fontSize: STEP_FONT,
+                    fontWeight: 700,
+                    color: FG,
+                  }}
+                >
+                  {`${i + 1}.`}
+                </div>
+                <div
+                  style={{
+                    width: LIST_WIDTH - NUM_WIDTH,
+                    fontSize: STEP_FONT,
+                    fontWeight: 700,
+                    color: FG,
+                    lineHeight: 1.25,
+                  }}
+                >
+                  {text}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
+
+      {/* Reserved bottom strip — left empty; the firmware draws a contextual
+          status message here on-device. */}
+      <div style={{ display: 'flex', height: MESSAGE_STRIP_H }} />
     </div>
   );
 }
