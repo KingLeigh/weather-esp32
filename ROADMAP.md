@@ -20,25 +20,51 @@ the firmware version with "up to date" / "update available"), and a
 **partial-refresh cursor** (a move repaints only the cursor column instead of the
 whole screen, with a full refresh on wrap-to-top to clear e-paper ghosting).
 Remaining:
-- **Debug logs** — a persisted history of recent fetch attempts + live diagnostics
-  (RSSI, fail counts, last-good fetch). Drawn on-device since it matters most when
-  offline. Likely the point to extract the menu into its own `menu.cpp`.
+- **Debug logs / failure ring buffer** — a persisted (RTC) history of the last
+  ~5–10 failures with timestamps + live diagnostics (RSSI, fail counts, last-good
+  fetch). Drawn on-device since it matters most when offline. This is also where
+  `SRV` finally gets disambiguated: store `lastHttpCode` per entry so 404 (bad
+  path) vs 5xx (dead worker) vs a negative transport error are distinguishable.
+  Likely the point to extract the menu into its own `menu.cpp`.
+- **Long-press fires on threshold, not release** — today the long-press action
+  (and the wake→menu paint) waits for you to *release* the button, so there's no
+  feedback while you hold and you can't tell how long is long enough. Make it act
+  the instant the hold crosses `BUTTON_HOLD_MS`, then swallow the still-held
+  button via a shared "waiting-for-release" gate so it isn't re-read — and can't
+  bleed into the factory-reset confirm and auto-confirm it. Two spots:
+  `readButtonEvent()` (returns `BTN_LONG` only after release) and `enterMenuMode()`
+  (its opening `while (digitalRead == LOW)` defers `renderMenu` until release).
+  Consider also dropping `BUTTON_HOLD_MS` (1500 ms) once there's instant feedback.
 - **Setup-screen text rework** (the splash doubles as the onboarding and setup-QR
   screen) and a broader **menu-flow / back-out UX** pass.
 
-### Status iconography below the weather
-Replace the single staleness *time* badge ("33m") with a set of small *binary*
-status icons — a symbol can't freeze at a wrong value the way a number can.
-Candidate icons: stale data, WiFi-connect failed, server/HTTP failed, battery low,
-alongside the existing battery gauge.
+### Status codes below the weather — ✅ Shipped (v5)
+Replaced the single staleness *time* badge ("33m") and the always-on battery icon
+with one priority-ranked 3-letter code in the reserved corner, shown only on a
+problem (blank when healthy): `NET` (WiFi failed), `SRV` (WiFi up but fetch
+failed), `OLD` (server data >60 min stale), `BAT` (battery low — lowest priority
+since it lingers for days). Diverged from the original "icons" idea: text codes
+carry more meaning per glyph and, like icons, never freeze at a wrong value.
 
-Constraint to resolve first: the failure icons and battery-low surface exactly when
-there is no fresh PNG to draw, and the current display path only does a full-screen
-refresh. Showing them mid-failure requires either a partial-region refresh, caching
-the last good PNG in flash, or relegating failure detail to the debug menu — that
-decision gates the rest of the redesign. Fixing the staleness badge so it reliably
-clears once data is fresh again is folded into this work rather than patched
-separately.
+The blocker (no fresh PNG to draw on a failed fetch) is solved by
+**partial-refreshing just the corner box** over the weather still held on the
+e-paper, so `NET`/`SRV` appear mid-outage without wiping the screen. Battery moved
+to a **pure-voltage model** (16-sample average, 3.5 V trip, RTC hysteresis latch);
+the old linear "%" was meaningless on a LiPo's flat discharge curve.
+
+Follow-ups:
+- **Calibrate the BAT trip voltage.** 3.5 V is an educated guess (~20–30% real
+  charge left, ±~10 pts), read under WiFi load, not measured from this cell. Proper
+  fix: log raw voltage per wake (e.g. a fetch header the worker records) to capture
+  the real discharge curve, then set the threshold from data.
+- **`IMG` and `CLK` codes.** `IMG` for a fetch that succeeds but the PNG won't
+  decode (a silent gap today); `CLK` for "NTP never synced" (which makes `OLD`
+  untrustworthy). Both slot into the existing priority list.
+- **`OLD` while offline** — needs the last-good `X-Updated` persisted in RTC (today
+  `OLD` only shows on a successful fetch).
+- **Offline → splash fallback.** After a prolonged offline stretch, repaint a
+  splash instead of holding stale weather forever; also the backstop that clears
+  any partial-refresh ghosting.
 
 ### OTA (over-the-air) firmware updates — ✅ Shipped
 The device pulls and flashes new firmware from the worker over WiFi — validated

@@ -54,7 +54,7 @@ The single source of truth for the version number is
 `firmware/src/config.h`:
 
 ```c
-inline constexpr int FIRMWARE_VERSION = 3;
+inline constexpr int FIRMWARE_VERSION = 5;
 ```
 
 Bump this integer (monotonically) for every release. `ota-publish.sh` reads it.
