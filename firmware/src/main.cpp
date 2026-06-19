@@ -10,9 +10,9 @@
 // boot lands in the weather flow.
 //
 // Change detection: a simple hash of the PNG bytes is persisted in RTC memory
-// across deep sleep cycles. If the hash, battery level, and staleness display
-// are all unchanged, the e-paper refresh is skipped (saves power and avoids
-// the visible flash of a full refresh).
+// across deep sleep cycles. If the hash and the active status code are both
+// unchanged, the e-paper refresh is skipped (saves power and avoids the visible
+// flash of a full refresh).
 
 #include <Arduino.h>
 #include <esp_sleep.h>
@@ -101,8 +101,12 @@ enum MenuItem {
 #define QR_ECC         ECC_MEDIUM
 #define QR_MODULE_PX   6   // 6 × 33 = 198 px QR data, leaves ~21 px white margin
 
-// Staleness threshold: show "Xm ago" / "Xh Ym ago" if data is older than this.
-#define STALE_THRESHOLD_MIN  30
+// OLD threshold: show the OLD code when the server's data (X-Updated) is older
+// than this. OLD now means a real, ongoing *server-side* staleness issue (the
+// fetch succeeded, so connectivity is fine) — NET/SRV cover the connectivity
+// failures separately — so the fuse is longer than when this also stood in for
+// bad WiFi.
+#define STALE_THRESHOLD_MIN  60
 
 // OTA updates are discovered for free: the worker advertises the latest
 // available firmware version on every weather response (X-Firmware-Latest),
@@ -115,22 +119,80 @@ enum MenuItem {
 // (a newer published version bypasses the cooldown and retries immediately).
 #define OTA_FAIL_COOLDOWN_WAKES  36
 
-// Battery: skip display refresh if battery changed less than this.
-#define BATTERY_TOLERANCE    10
+// Status region: bottom-right corner, reserved by the server layout. The server
+// leaves this area empty; we stamp at most one 3-letter status code here.
+#define OVERLAY_COLOR_MUTED  0x50  // medium grey (debug-screen divider)
 
-// Overlay region: bottom-right corner, reserved by the server layout.
-// The server leaves this area empty; we draw battery + staleness here.
-#define OVERLAY_COLOR_FG     0x00  // black
-#define OVERLAY_COLOR_MUTED  0x50  // medium grey
-#define OVERLAY_COLOR_OUTLINE 0xA0 // light grey (battery outline)
+// ─── status codes ────────────────────────────────────────────────────────────
+// The device surfaces problems as a single 3-letter code in the status region:
+// computeStatus() returns the highest-priority active code and drawStatus()
+// stamps it. Nothing is drawn when everything is healthy. This replaces the old
+// always-on battery icon + "Xm ago" staleness text.
+//
+// To add a code: insert an enum value at the right priority (lower value = more
+// severe / drawn first), add its 3-letter string to STATUS_CODES at the same
+// index, and add a predicate to computeStatus() in the matching slot.
+enum StatusCode {
+    ST_NONE = -1,
+    ST_NET  = 0,   // can't connect to WiFi / network
+    ST_SRV,        // WiFi up but couldn't fetch weather (server / HTTP error)
+    ST_OLD,        // weather data is stale
+    ST_BAT,        // battery low — time to charge (lowest priority: it lingers
+                   //   for days, so it must not starve out time-sensitive errors)
+    ST_COUNT
+};
+
+static const char *STATUS_CODES[ST_COUNT] = {
+    "NET",  // ST_NET
+    "SRV",  // ST_SRV
+    "OLD",  // ST_OLD
+    "BAT",  // ST_BAT
+};
+
+// Status box: the corner rectangle a code occupies. Used for partial refresh,
+// where there's no fresh image to do a full redraw with (e.g. NET — WiFi down),
+// so we repaint only this box and leave the retained weather on the panel. x and
+// width MUST be even so each row packs to a clean byte boundary in the 4bpp
+// framebuffer. The box sits inside the server's reserved (empty) region, so
+// clearing it to white always matches the weather image beneath it.
+#define STATUS_BOX_X   880   // even — left edge
+#define STATUS_BOX_W   80    // even — 880..960 (panel right edge)
+#define STATUS_BOX_Y   496
+#define STATUS_BOX_H   44    // 496..540 (panel bottom edge)
+#define STATUS_TEXT_X  890   // writeln cursor, inset from the box
+#define STATUS_TEXT_Y  525   // text baseline
+// Erase cycles for the status box partial refresh. Partials chain (so ghosting
+// accrues) only across NET<->SRV oscillation with no successful fetch between — a
+// plain WiFi flap self-cleans, since any wake that fetches is a full refresh, and
+// a stably-offline device holds one code and never repaints. A clearing full
+// refresh eventually comes on the next successful fetch, or (future) a
+// prolonged-offline splash. So ghosting barely accrues; 2 is a slightly cleaner
+// erase than the cursor's 1. Bump it if the corner smears under sustained
+// NET<->SRV oscillation; drop to 1 if the flash is too eager.
+#define STATUS_CLEAR_CYCLES  2
+
+// BAT trips when the pack voltage falls to BATTERY_LOW_MV and only clears once
+// it rises back to BATTERY_OK_MV — i.e. only after an actual recharge. The wide
+// gap is hysteresis: it stops BAT flapping on/off as the reading jitters near
+// the threshold (the battery only discharges between charges, so once tripped it
+// stays tripped until you plug it in).
+//
+// We work in raw millivolts rather than a percentage: a single-cell LiPo's
+// voltage→charge curve is very non-linear (a long flat plateau, then a cliff
+// below ~3.5 V), so a linear "%" is meaningless exactly where it matters. The
+// reading is taken with WiFi up, so the radio's current draw sags the rail —
+// this trip point is deliberately below a resting "charge me" target. These are
+// first-pass values; tune them once we have real discharge data from this cell.
+#define BATTERY_LOW_MV   3500   // ~3.5 V (loaded) — show BAT at/below this
+#define BATTERY_OK_MV    3700   // ~3.7 V — clears the latch after a recharge
 
 // ─── RTC memory — survives deep sleep ────────────────────────────────────────
 // RTC_DATA_ATTR places these in RTC slow memory, which is NOT cleared on
 // deep-sleep wake. Regular RAM is wiped on every wake.
 
 RTC_DATA_ATTR static uint32_t prev_png_hash       = 0;
-RTC_DATA_ATTR static int      prev_battery        = -1;
-RTC_DATA_ATTR static bool     prev_was_stale      = false;
+RTC_DATA_ATTR static int      prev_status         = ST_NONE;
+RTC_DATA_ATTR static bool     battery_low_latched = false;
 RTC_DATA_ATTR static uint32_t boot_count          = 0;
 // Set after we render the splash for a no-config / offline state, so we don't
 // re-flash the same splash on every wake (visible refresh + power cost).
@@ -323,20 +385,31 @@ static void calibrateADC() {
     }
 }
 
-static int readBatteryPercent() {
+// Returns the pack voltage in millivolts. Averages several ADC samples because
+// a single read is noisy — especially here, where WiFi current spikes bounce the
+// rail by tens of mV (≈1% of a cell's usable range per 12 mV).
+static int readBatteryMillivolts() {
     // EPD must be powered on for BATT_PIN ADC to read correctly.
     epd_poweron();
     delay(10);
-    uint16_t v = analogRead(BATT_PIN);
+    const int N = 16;
+    uint32_t sum = 0;
+    for (int i = 0; i < N; i++) sum += analogRead(BATT_PIN);
     epd_poweroff();
 
-    float voltage = ((float)v / 4095.0f) * 2.0f * 3.3f * (vref / 1000.0f);
-    if (voltage > 4.2f) voltage = 4.2f;
+    float adc = (float)sum / N;
+    // BATT_PIN sits behind a 2:1 divider; convert raw ADC → pack volts → mV.
+    float voltage = (adc / 4095.0f) * 2.0f * 3.3f * (vref / 1000.0f);
+    return (int)(voltage * 1000.0f);
+}
 
-    int pct = (int)((voltage - 3.0f) / 1.2f * 100.0f);
-    if (pct < 0) pct = 0;
-    if (pct > 100) pct = 100;
-    return pct;
+// Hysteretic low-battery state: trips at BATTERY_LOW_MV, clears at BATTERY_OK_MV.
+// Latched in RTC so it survives deep sleep and only flips on a genuine
+// charge/discharge crossing, not on per-wake measurement jitter.
+static bool batteryIsLow(int mv) {
+    if (mv <= BATTERY_LOW_MV)     battery_low_latched = true;
+    else if (mv >= BATTERY_OK_MV) battery_low_latched = false;
+    return battery_low_latched;
 }
 
 // ─── staleness ───────────────────────────────────────────────────────────────
@@ -366,41 +439,57 @@ static int getAgeMinutes(const char *ts) {
     return secs < 0 ? 0 : secs / 60;
 }
 
-// Writes e.g. "35m" or "1h 23m" into buf. Empty string if fresh (<=threshold).
-static void formatAge(int age_min, char *buf, size_t bufSize) {
-    buf[0] = '\0';
-    if (age_min < 0 || age_min <= STALE_THRESHOLD_MIN) return;
-    int h = age_min / 60;
-    int m = age_min % 60;
-    if (h > 0) snprintf(buf, bufSize, "%dh %dm", h, m);
-    else       snprintf(buf, bufSize, "%dm", age_min);
+// ─── status: highest-priority code drawn into framebuffer ────────────────────
+// Drawn after PNG decode, in the bottom-right ~200×44 px reserved region.
+
+// Returns the highest-priority active status code, or ST_NONE if healthy.
+// Predicates are evaluated most-severe-first; the first match wins, so only the
+// single worst problem is ever surfaced.
+static int computeStatus(bool net_failed, bool srv_failed, int age_min, bool battery_low) {
+    if (net_failed)                    return ST_NET;
+    if (srv_failed)                    return ST_SRV;
+    if (age_min > STALE_THRESHOLD_MIN) return ST_OLD;
+    if (battery_low)                   return ST_BAT;
+    return ST_NONE;
 }
 
-// ─── overlay: battery + staleness drawn into framebuffer ─────────────────────
-// Drawn after PNG decode, in the bottom-right 200×44 px reserved region.
-
-static void drawBatteryIcon(int32_t x, int32_t y, int pct) {
-    int32_t w = 40, h = 20, tip_w = 4;
-    epd_draw_rect(x, y, w, h, OVERLAY_COLOR_OUTLINE, framebuffer);
-    epd_fill_rect(x + w, y + 6, tip_w, h - 12, OVERLAY_COLOR_OUTLINE, framebuffer);
-    int32_t fill_w = (w - 2) * pct / 100;
-    if (fill_w > 0) {
-        epd_fill_rect(x + 1, y + 1, fill_w, h - 2, OVERLAY_COLOR_MUTED, framebuffer);
-    }
+// Stamps the status code in the reserved corner, or nothing if ST_NONE. The
+// server keeps this region empty, so on a full refresh it is already blank.
+static void drawStatus(int status) {
+    if (status == ST_NONE) return;
+    int32_t x = STATUS_TEXT_X;
+    int32_t y = STATUS_TEXT_Y;
+    writeln((GFXfont *)&FiraSans, (char *)STATUS_CODES[status], &x, &y, framebuffer);
 }
 
-static void drawOverlay(int battery_pct, const char *age_str) {
-    // Battery icon — bottom-right corner.
-    int32_t batt_x = EPD_WIDTH - 55;
-    int32_t batt_y = EPD_HEIGHT - 35;
-    drawBatteryIcon(batt_x, batt_y, battery_pct);
+// Repaints ONLY the status box, leaving the rest of the panel physically intact.
+// Used when there's no fresh image (failed fetch) but the status code changed:
+// the last good weather is still held on the e-paper, so a full push would wipe
+// it. The framebuffer is white at this point (cleared at wake), so the box ends
+// up white + the code — or white alone when the code clears (ST_NONE).
+static uint8_t statusSubBuf[(STATUS_BOX_W / 2) * STATUS_BOX_H];
 
-    // Staleness text — to the left of battery, only if stale.
-    if (age_str[0] != '\0') {
-        int32_t tx = batt_x - 80;
-        int32_t ty = EPD_HEIGHT - 15;
-        writeln((GFXfont *)&FiraSans, age_str, &tx, &ty, framebuffer);
+static void partialRefreshStatus(int status) {
+    Rect_t box = { STATUS_BOX_X, STATUS_BOX_Y, STATUS_BOX_W, STATUS_BOX_H };
+
+    // Build the box in the framebuffer, then pack it tightly (2 px/byte, stride =
+    // width/2) — STATUS_BOX_X/W are even, so each row is a clean memcpy.
+    epd_fill_rect(box.x, box.y, box.width, box.height, 0xFF, framebuffer);
+    drawStatus(status);  // no-op if ST_NONE → box stays white (code cleared)
+
+    const int32_t stride = box.width / 2;
+    for (int32_t row = 0; row < box.height; row++) {
+        const uint8_t *src =
+            framebuffer + (box.y + row) * (EPD_WIDTH / 2) + box.x / 2;
+        memcpy(statusSubBuf + row * stride, src, stride);
     }
+
+    epd_poweron();
+    epd_clear_area_cycles(box, STATUS_CLEAR_CYCLES, 50);
+    epd_draw_grayscale_image(box, statusSubBuf);
+    epd_poweroff();
+    Serial.printf("Status corner repainted (partial): %s\n",
+                  status == ST_NONE ? "(cleared)" : STATUS_CODES[status]);
 }
 
 // ─── HTTP fetch ──────────────────────────────────────────────────────────────
@@ -677,6 +766,15 @@ enum MenuButton { BTN_NONE, BTN_SHORT, BTN_LONG };
 // Polls the button once. Returns BTN_NONE if not pressed; otherwise blocks for
 // the press duration and classifies SHORT (< BUTTON_HOLD_MS) vs LONG. For a
 // LONG press it waits for release so the hold isn't re-read as another event.
+//
+// TODO (see ROADMAP.md "Long-press fires on threshold"): a long press should
+// take effect the instant the hold crosses BUTTON_HOLD_MS — not on release —
+// so there's feedback while holding. That means returning BTN_LONG immediately
+// (drop the wait-for-release here) and instead swallowing the still-held button
+// via a shared "waiting-for-release" gate, so it isn't re-read AND can't bleed
+// into the next screen (e.g. auto-confirm the factory reset). The same gate
+// also replaces enterMenuMode()'s opening `while (digitalRead==LOW)` so the
+// wake→menu paint happens at the threshold too.
 static MenuButton readButtonEvent() {
     if (digitalRead(BUTTON_GPIO) == HIGH) return BTN_NONE;  // not pressed
     delay(20);                                              // debounce
@@ -1167,8 +1265,9 @@ void setup() {
     // ── Fetch PNG ────────────────────────────────────────────────────────
     String pngUrl = String(SERVER_BASE_URL) + "/weather/" + cfg.zip + ".png";
 
+    bool wifiOk  = connectWiFi(cfg.ssid.c_str(), cfg.password.c_str());
     bool fetchOk = false;
-    if (connectWiFi(cfg.ssid.c_str(), cfg.password.c_str())) {
+    if (wifiOk) {
         fetchOk = fetchPng(pngUrl.c_str());
         // Leave WiFi up: the OTA step runs after the weather is on screen
         // (further down) so the device shows fresh weather before any firmware
@@ -1177,46 +1276,58 @@ void setup() {
         Serial.println("WiFi failed");
     }
 
-    // ── Read battery + compute staleness ─────────────────────────────────
-    int battery = readBatteryPercent();
-    int ageMin  = getAgeMinutes(updatedStr);
-    bool isStale = (ageMin > STALE_THRESHOLD_MIN);
-    char ageStr[16];
-    formatAge(ageMin, ageStr, sizeof(ageStr));
+    // ── Read battery + compute status ────────────────────────────────────
+    int  battMv   = readBatteryMillivolts();
+    bool battLow  = batteryIsLow(battMv);
+    int  ageMin   = getAgeMinutes(updatedStr);
+    int  status   = computeStatus(!wifiOk, wifiOk && !fetchOk, ageMin, battLow);
 
-    Serial.printf("Battery: %d%%  Age: %d min  Stale: %s\n",
-                  battery, ageMin, isStale ? "yes" : "no");
+    Serial.printf("Battery: %d mV (low=%d)  Age: %d min  WiFi: %s  Status: %s\n",
+                  battMv, battLow, ageMin, wifiOk ? "ok" : "FAIL",
+                  status == ST_NONE ? "OK" : STATUS_CODES[status]);
 
     // ── Change detection ─────────────────────────────────────────────────
     uint32_t newHash = fetchOk ? hashBytes(pngBuf, pngLen) : prev_png_hash;
 
-    bool pngChanged     = (newHash != prev_png_hash);
-    bool battChanged    = (abs(battery - prev_battery) > BATTERY_TOLERANCE);
-    bool staleChanged   = (isStale != prev_was_stale);
-    bool shouldRefresh  = firstBoot || pngChanged || battChanged || staleChanged;
+    bool pngChanged    = (newHash != prev_png_hash);
+    bool statusChanged = (status != prev_status);
+    bool shouldRefresh = firstBoot || pngChanged || statusChanged;
 
-    Serial.printf("Hash: 0x%08X (prev 0x%08X)  changed=%d  batt_changed=%d  stale_changed=%d\n",
-                  newHash, prev_png_hash, pngChanged, battChanged, staleChanged);
+    Serial.printf("Hash: 0x%08X (prev 0x%08X)  changed=%d  status_changed=%d\n",
+                  newHash, prev_png_hash, pngChanged, statusChanged);
 
     if (!shouldRefresh) {
         Serial.println("No changes — skipping display refresh.");
-    } else if (!fetchOk) {
-        Serial.println("Fetch failed on first boot — screen left blank.");
-    } else {
-        // Decode PNG into framebuffer.
+    } else if (fetchOk) {
+        // Fresh image — full refresh with the status code stamped on top.
         if (decodePng()) {
-            // Draw battery + staleness overlay on top of the decoded image.
-            drawOverlay(battery, ageStr);
+            drawStatus(status);
             pushDisplay();
+            // Record what's now on screen so a later status change repaints even
+            // when the PNG itself is unchanged. Set only after a real draw.
+            prev_status = status;
         } else {
-            Serial.println("PNG decode failed — screen left blank.");
+            Serial.println("PNG decode failed — screen left as-is.");
         }
+    } else if (firstBoot) {
+        // No image has ever been shown and we couldn't fetch one.
+        Serial.println("Fetch failed on first boot — screen left blank.");
+    } else if (statusChanged) {
+        // Couldn't fetch, but the last good weather is still physically on the
+        // e-paper. Repaint just the status corner (NET/SRV appeared or cleared);
+        // a full push would wipe the retained weather. A failed fetch is always
+        // NET or SRV, so the only way partials chain (and ghosting accrues) is
+        // NET<->SRV oscillation with no success between — a plain WiFi flap
+        // self-cleans, since any wake that fetches is a full refresh. That full
+        // refresh (or, future, a prolonged-offline splash) wipes the residue.
+        partialRefreshStatus(status);
+        prev_status = status;
+    } else {
+        Serial.println("Fetch failed; status unchanged — screen left as-is.");
     }
 
     // ── Persist state for next wake ──────────────────────────────────────
     if (fetchOk) prev_png_hash = newHash;
-    prev_battery   = battery;
-    prev_was_stale = isStale;
 
     // Free PNG buffer before sleep.
     if (pngBuf) { free(pngBuf); pngBuf = nullptr; pngLen = 0; }
