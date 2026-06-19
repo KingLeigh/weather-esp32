@@ -6,12 +6,18 @@
 // connection, fetches a test PNG from the worker, and on success writes the
 // values to NVS via saveConfig() and calls esp_restart().
 //
-// Returns ONLY on idle timeout (no HTTP activity for IDLE_TIMEOUT_MS). On
-// successful save the chip restarts and never returns from this function.
-// On entry, caller is expected to have rendered the splash already (so the
-// device shows the "Press and hold middle button" instructions / future QR
-// while the AP is broadcasting).
+// Returns on idle timeout (no activity for IDLE_TIMEOUT_MS) OR when the user
+// long-presses the button to open the on-device menu. On a successful save the
+// chip restarts and never returns from this function. The caller renders the
+// setup screen before calling (renderSetupScreen, with the WiFi-join QR).
 
 #pragma once
 
-void enterSetupMode();
+// Why enterSetupMode() returned (it never returns on a successful save — the
+// chip restarts instead).
+enum SetupResult {
+    SETUP_TIMEOUT,  // idle timeout / user gave up — caller goes home
+    SETUP_MENU,     // user long-pressed → open the on-device menu
+};
+
+SetupResult enterSetupMode();

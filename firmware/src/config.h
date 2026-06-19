@@ -21,7 +21,14 @@ inline constexpr const char *SERVER_BASE_URL =
 // worker's /firmware/check endpoint as the `current` query param so the worker
 // can decide whether a newer build is available for this device's channel.
 // Displayed on the splash/setup screen as "vN". Bump on every OTA release.
-inline constexpr int FIRMWARE_VERSION = 6;
+inline constexpr int FIRMWARE_VERSION = 7;
+
+// User button (IO21): wakes the chip from deep sleep via ext0; a long-press
+// (≥ BUTTON_HOLD_MS) enters the menu / setup while a brief tap is ignored.
+// Shared by the wake path (main.cpp) and setup mode (setup_mode.cpp polls it to
+// offer long-press → menu while the captive-portal AP is up).
+#define BUTTON_GPIO     GPIO_NUM_21
+#define BUTTON_HOLD_MS  1500
 
 struct DeviceConfig {
     String ssid;

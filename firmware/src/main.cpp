@@ -43,17 +43,27 @@
 // outages without burning extra battery in the steady-state success case.
 #define RETRY_SLEEP_MINUTES  5
 
+// After this many consecutive failed WiFi connects (~3h at RETRY_SLEEP_MINUTES),
+// a configured device gives up its now-stale weather and falls back to the
+// no-WiFi splash. The streak resets on ANY successful connect, so intermittent
+// WiFi never trips it — only a sustained outage does.
+#define WIFI_FAIL_SPLASH_THRESHOLD  36
+// While on the no-WiFi splash, recheck for WiFi at this slower cadence (vs the
+// 5-min retry) — we've given up for now, so just poll occasionally to save power.
+#define RECOVERY_SLEEP_MINUTES  30
+// Message drawn in the splash's reserved bottom strip when a configured device
+// has lost WiFi past the threshold (splash.jsx leaves this strip clear).
+#define SPLASH_MSG_NO_WIFI  "WiFi network unavailable"
+#define SPLASH_MSG_Y        (EPD_HEIGHT - 40)   // text baseline in the bottom strip
+
 // SERVER_BASE_URL lives in config.h (used by both main + setup_mode).
 
 // WiFi connect timeout — give up if STA association doesn't complete in this
 // window, count the wake as a failure, and deep sleep.
 #define WIFI_TIMEOUT_MS      20000
 
-// User button — IO21 wakes the chip from deep sleep via ext0. Long-press
-// (≥ this duration) is required to enter setup mode, so a stray tap doesn't
-// pull the user out of normal operation.
-#define BUTTON_GPIO          GPIO_NUM_21
-#define BUTTON_HOLD_MS       1500
+// BUTTON_GPIO / BUTTON_HOLD_MS now live in config.h (shared with setup_mode.cpp,
+// which polls the button to offer long-press → menu while the AP is up).
 
 // ── On-device menu ───────────────────────────────────────────────────────────
 // Opened by a long-press wake; navigated by short presses (cycle the cursor),
@@ -195,6 +205,10 @@ static const char *STATUS_CODES[ST_COUNT] = {
 RTC_DATA_ATTR static uint32_t prev_png_hash       = 0;
 RTC_DATA_ATTR static int      prev_status         = ST_NONE;
 RTC_DATA_ATTR static bool     battery_low_latched = false;
+// No-WiFi splash fallback: consecutive failed connects, and whether the current
+// home screen is the splash (vs weather). See WIFI_FAIL_SPLASH_THRESHOLD.
+RTC_DATA_ATTR static uint32_t wifi_fail_streak    = 0;
+RTC_DATA_ATTR static bool     home_is_splash      = false;
 RTC_DATA_ATTR static uint32_t boot_count          = 0;
 // Set after we render the splash for a no-config / offline state, so we don't
 // re-flash the same splash on every wake (visible refresh + power cost).
@@ -643,7 +657,8 @@ static void drawQrOverPlaceholder(const char *text) {
 // renderSplash() (onboarding / offline fallback) and renderSetupScreen()
 // (shown while the AP is active).
 static void renderBakedScreen(const uint8_t *pngData, uint32_t pngDataLen,
-                              const char *label, const char *wifiJoinStr) {
+                              const char *label, const char *wifiJoinStr,
+                              const char *bottomMsg) {
     int rc = png.openRAM((uint8_t *)pngData, pngDataLen, png_draw_callback);
     if (rc != PNG_SUCCESS) {
         Serial.printf("%s openRAM failed: %d\n", label, rc);
@@ -663,18 +678,29 @@ static void renderBakedScreen(const uint8_t *pngData, uint32_t pngDataLen,
         drawQrOverPlaceholder(wifiJoinStr);
     }
 
+    if (bottomMsg && bottomMsg[0]) {
+        // Centered in the reserved bottom strip (splash.jsx keeps it clear).
+        int32_t bx = 0, by = 0, x1, y1, w, h;
+        get_text_bounds((GFXfont *)&FiraSans, bottomMsg, &bx, &by, &x1, &y1, &w, &h, NULL);
+        int32_t mx = (EPD_WIDTH - w) / 2;
+        int32_t my = SPLASH_MSG_Y;
+        writeln((GFXfont *)&FiraSans, (char *)bottomMsg, &mx, &my, framebuffer);
+        Serial.printf("%s: bottom message '%s'\n", label, bottomMsg);
+    }
+
     pushDisplay();
 }
 
-// Onboarding / offline-fallback splash (no AP active). Optionally draws a QR.
-void renderSplash(const char *wifiJoinStr) {
-    renderBakedScreen(splash_png, splash_png_len, "Splash", wifiJoinStr);
+// Onboarding / offline-fallback splash (no AP active). Optionally draws a
+// bottom-strip message (e.g. the no-WiFi reason); never draws a QR.
+void renderSplash(const char *bottomMsg) {
+    renderBakedScreen(splash_png, splash_png_len, "Splash", nullptr, bottomMsg);
 }
 
 // Device-setup screen, shown while the captive-portal AP is up. Draws the
 // WiFi-join QR over the reserved QR area (the PNG has no placeholder box).
 void renderSetupScreen(const char *wifiJoinStr) {
-    renderBakedScreen(setup_png, setup_png_len, "Setup", wifiJoinStr);
+    renderBakedScreen(setup_png, setup_png_len, "Setup", wifiJoinStr, nullptr);
 }
 
 // ─── on-device menu ─────────────────────────────────────────────────────────
@@ -1064,15 +1090,20 @@ static void enterMenuMode(const DeviceConfig &cfg, bool hasConfig) {
                 case MENU_EXIT:
                     Serial.println("Menu: exit.");
                     return;
-                case MENU_DEVICE_SETUP:
+                case MENU_DEVICE_SETUP: {
                     // Bring up the AP + captive portal. On a successful save this
-                    // esp_restart()s (never returns); it returns only on its own
-                    // idle timeout — treat that as "go home": exit the menu so the
-                    // caller drops back to weather (or the onboarding splash).
+                    // esp_restart()s (never returns). A long-press there comes
+                    // back to this menu; an idle timeout means "go home" — exit
+                    // the menu so the caller drops back to weather / splash.
                     Serial.println("Menu: entering device setup.");
-                    enterSetupMode();
+                    if (enterSetupMode() == SETUP_MENU) {
+                        Serial.println("Setup: long-press — back to menu.");
+                        renderMenu(selected);
+                        break;
+                    }
                     Serial.println("Setup idle timeout — exiting menu.");
                     return;
+                }
                 case MENU_FACTORY_RESET: {
                     ConfirmResult cr = confirmFactoryReset();
                     if (cr == CONFIRM_YES) {
@@ -1224,40 +1255,59 @@ void setup() {
         Serial.println("No NVS config — device not yet set up.");
     }
 
-    // ── Long-press entry: setup (unconfigured) or menu (configured) ──────
+    // ── Long-press entry: setup (on a splash) or menu (showing weather) ──
+    // A long press goes straight to setup whenever a splash is on screen — no
+    // config, or the no-WiFi fallback — since (re)configuring WiFi is the only
+    // useful action there. Only when weather is up does it open the menu.
     if (wantMenu) {
-        if (hasConfig) {
-            // Configured: open the on-device menu (Device setup / Debug mode /
-            // Factory reset). Short press cycles the cursor, long press selects;
+        bool onSplash = !hasConfig || home_is_splash;
+        if (!onSplash) {
+            // Weather is showing: open the on-device menu (Device setup / Debug
+            // mode / Factory reset). Short press cycles, long press selects;
             // returns on "Exit menu" or an idle timeout.
             Serial.println("Long-press: opening on-device menu.");
             enterMenuMode(cfg, hasConfig);
-            // Return to weather. The menu is currently on screen, so force a
-            // repaint on the next fetch (change detection would otherwise skip
-            // it when the fetched PNG matches the previously-displayed weather).
+            // Force a repaint on the next fetch (the menu is on screen, and the
+            // fetched PNG may match the previously-displayed weather).
             Serial.println("Menu exited — returning to weather.");
             prev_png_hash = 0;
             // fall through to the weather flow ↓
         } else {
-            // Unconfigured: skip the menu and go straight to setup — with no
-            // config it's the only useful screen. enterSetupMode() reboots on a
-            // successful save (never returns); on idle timeout it repaints the
-            // onboarding splash itself and returns, so we just sleep here (a
-            // button-only wake, so the next long-press re-enters setup).
-            Serial.println("Long-press with no config — entering setup directly.");
-            enterSetupMode();
-            splash_already_drawn = true;
-            enterDeepSleep(/*armTimer=*/false);
-            return;
+            // On a splash: go straight to setup. A long-press there opens the
+            // menu (so Debug / Factory reset stay reachable); a save reboots
+            // (never returns); an idle timeout just returns.
+            Serial.println("Long-press on splash — entering setup directly.");
+            bool wentToMenu = (enterSetupMode() == SETUP_MENU);
+            if (wentToMenu) {
+                enterMenuMode(cfg, hasConfig);
+            }
+            if (!hasConfig) {
+                // Still unconfigured: ensure the onboarding splash is up (the menu
+                // may have left other content on screen) and sleep — button-only
+                // wake, so the next long-press re-enters setup.
+                if (wentToMenu) renderSplash();
+                splash_already_drawn = true;
+                home_is_splash = true;
+                enterDeepSleep(/*armTimer=*/false);
+                return;
+            }
+            // Configured (was on the no-WiFi splash): re-test connectivity via the
+            // weather flow below — it recovers to weather or repaints the splash.
+            // Force a repaint (setup/menu is on screen now) and decide fresh.
+            home_is_splash = false;
+            prev_png_hash = 0;
+            // fall through to the weather flow ↓
         }
     } else if (!hasConfig) {
-        // No setup requested + no NVS config: show splash, wait for button.
+        // No setup requested + no NVS config: show the onboarding splash and
+        // wait for a button press.
         if (!splash_already_drawn) {
             renderSplash();
             splash_already_drawn = true;
         } else {
             Serial.println("Splash already drawn — skipping refresh.");
         }
+        home_is_splash = true;
         enterDeepSleep(/*armTimer=*/false);
         return;
     }
@@ -1294,48 +1344,59 @@ void setup() {
                   battMv, battLow, ageMin, wifiOk ? "ok" : "FAIL",
                   status == ST_NONE ? "OK" : STATUS_CODES[status]);
 
+    // ── WiFi-failure streak (drives the no-WiFi splash fallback) ─────────
+    // Count consecutive failed connects; reset on any successful connect, so
+    // intermittent WiFi never trips the fallback — only a sustained outage.
+    wifi_fail_streak = wifiOk ? 0 : (wifi_fail_streak + 1);
+
     // ── Change detection ─────────────────────────────────────────────────
     uint32_t newHash = fetchOk ? hashBytes(pngBuf, pngLen) : prev_png_hash;
-
     bool pngChanged    = (newHash != prev_png_hash);
     bool statusChanged = (status != prev_status);
-    bool shouldRefresh = firstBoot || pngChanged || statusChanged;
 
-    Serial.printf("Hash: 0x%08X (prev 0x%08X)  changed=%d  status_changed=%d\n",
-                  newHash, prev_png_hash, pngChanged, statusChanged);
+    Serial.printf("Hash: 0x%08X (prev 0x%08X)  png_changed=%d  status_changed=%d  "
+                  "wifi_fail_streak=%u  home=%s\n",
+                  newHash, prev_png_hash, pngChanged, statusChanged,
+                  (unsigned)wifi_fail_streak, home_is_splash ? "splash" : "weather");
 
-    if (!shouldRefresh) {
-        Serial.println("No changes — skipping display refresh.");
-    } else if (fetchOk) {
-        // Fresh image — full refresh with the status code stamped on top.
-        if (decodePng()) {
+    if (fetchOk && decodePng()) {
+        // Fresh weather. Repaint if anything changed, on first boot, or when
+        // coming back from the splash (which is currently the home screen).
+        if (firstBoot || pngChanged || statusChanged || home_is_splash) {
             drawStatus(status);
             pushDisplay();
-            // Record what's now on screen so a later status change repaints even
-            // when the PNG itself is unchanged. Set only after a real draw.
+        } else {
+            Serial.println("No changes — skipping display refresh.");
+        }
+        prev_status    = status;
+        prev_png_hash  = newHash;
+        home_is_splash = false;
+    } else {
+        // No fresh weather this wake (WiFi down, fetch failed, or decode failed).
+        bool giveUpWeather = (wifi_fail_streak >= WIFI_FAIL_SPLASH_THRESHOLD);
+        if (home_is_splash) {
+            // Already on the no-WiFi splash — recheck mode, leave it as-is.
+            Serial.println("Still offline — staying on the no-WiFi splash.");
+        } else if (firstBoot || giveUpWeather) {
+            // Nothing worth preserving (fresh boot, no weather) or the on-screen
+            // weather is now too stale — give it up and show the splash.
+            Serial.printf("No weather to show (firstBoot=%d, fail_streak=%u) — splash.\n",
+                          firstBoot, (unsigned)wifi_fail_streak);
+            renderSplash(SPLASH_MSG_NO_WIFI);
+            home_is_splash = true;
+            prev_status    = ST_NONE;
+        } else if (statusChanged) {
+            // Still have recent weather on screen — keep it, stamp the status code
+            // (NET/SRV) in the corner via partial refresh. A failed fetch is
+            // always NET or SRV, so partials only chain (and ghosting accrues) on
+            // NET<->SRV oscillation; the eventual splash/weather full refresh
+            // wipes any residue.
+            partialRefreshStatus(status);
             prev_status = status;
         } else {
-            Serial.println("PNG decode failed — screen left as-is.");
+            Serial.println("Offline; status unchanged — keeping weather as-is.");
         }
-    } else if (firstBoot) {
-        // No image has ever been shown and we couldn't fetch one.
-        Serial.println("Fetch failed on first boot — screen left blank.");
-    } else if (statusChanged) {
-        // Couldn't fetch, but the last good weather is still physically on the
-        // e-paper. Repaint just the status corner (NET/SRV appeared or cleared);
-        // a full push would wipe the retained weather. A failed fetch is always
-        // NET or SRV, so the only way partials chain (and ghosting accrues) is
-        // NET<->SRV oscillation with no success between — a plain WiFi flap
-        // self-cleans, since any wake that fetches is a full refresh. That full
-        // refresh (or, future, a prolonged-offline splash) wipes the residue.
-        partialRefreshStatus(status);
-        prev_status = status;
-    } else {
-        Serial.println("Fetch failed; status unchanged — screen left as-is.");
     }
-
-    // ── Persist state for next wake ──────────────────────────────────────
-    if (fetchOk) prev_png_hash = newHash;
 
     // Free PNG buffer before sleep.
     if (pngBuf) { free(pngBuf); pngBuf = nullptr; pngLen = 0; }
@@ -1366,11 +1427,12 @@ void setup() {
     }
     disconnectWiFi();
 
-    // Shorter retry interval if we couldn't fetch — recover from transient
-    // WiFi/server outages quickly, without burning extra battery on the
-    // steady-state success case.
-    enterDeepSleep(/*armTimer=*/true,
-                   fetchOk ? SLEEP_MINUTES : RETRY_SLEEP_MINUTES);
+    // Sleep cadence: normal on success; a faster retry on a transient failure;
+    // but once we've fallen back to the no-WiFi splash, recheck slowly to save
+    // battery (we've given up for now — no point retrying every 5 min).
+    uint32_t sleepMin = home_is_splash ? RECOVERY_SLEEP_MINUTES
+                      : (fetchOk ? SLEEP_MINUTES : RETRY_SLEEP_MINUTES);
+    enterDeepSleep(/*armTimer=*/true, sleepMin);
 }
 
 void loop() {

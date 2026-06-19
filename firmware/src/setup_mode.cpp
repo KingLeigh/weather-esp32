@@ -522,7 +522,7 @@ static void handleNotFound() {
 
 // ─── entry point ─────────────────────────────────────────────────────────────
 
-void enterSetupMode() {
+SetupResult enterSetupMode() {
     Serial.println("=== Entering setup mode ===");
 
     // AP_STA so we can run an AP for the captive portal AND attempt STA
@@ -556,23 +556,54 @@ void enterSetupMode() {
     lastActivityMs = millis();
     Serial.printf("Setup: idle timeout = %lu ms\n", IDLE_TIMEOUT_MS);
 
-    // Run until idle timeout. handleSave() calls esp_restart() on success and
-    // never returns, so reaching the end of this loop means the user gave up.
+    // Run until idle timeout, a successful save (handleSave() esp_restart()s and
+    // never returns), or a long-press of the button — which exits to the
+    // on-device menu so Debug / Factory reset are reachable from here too.
+    pinMode(BUTTON_GPIO, INPUT_PULLUP);
+    // The long-press that opened setup may still be held (the wake handler
+    // confirms at the hold threshold, not on release) — wait for release so it
+    // isn't immediately re-counted here as an in-setup long-press → menu.
+    while (digitalRead(BUTTON_GPIO) == LOW) delay(10);
+    bool menuRequested = false;
+    unsigned long btnDownSince = 0;
+
     while (millis() - lastActivityMs < IDLE_TIMEOUT_MS) {
         dns.processNextRequest();
         http.handleClient();
+
+        if (digitalRead(BUTTON_GPIO) == LOW) {
+            lastActivityMs = millis();  // a held button is activity, not idle
+            if (btnDownSince == 0) {
+                btnDownSince = millis();
+            } else if (millis() - btnDownSince >= BUTTON_HOLD_MS) {
+                Serial.println("Setup: long-press — exiting to menu.");
+                while (digitalRead(BUTTON_GPIO) == LOW) delay(10);  // wait for release
+                menuRequested = true;
+                break;
+            }
+        } else {
+            btnDownSince = 0;
+        }
         delay(10);
     }
 
-    Serial.println("Setup: idle timeout — tearing down AP and returning.");
+    // Tear down the AP on any exit path.
+    Serial.println(menuRequested ? "Setup: tearing down AP for menu."
+                                  : "Setup: idle timeout — tearing down AP.");
     http.stop();
     dns.stop();
     WiFi.softAPdisconnect(true);
     WiFi.disconnect(true);
     WiFi.mode(WIFI_OFF);
 
-    // Repaint plain splash (no QR) so the screen no longer suggests an active
-    // AP. If the caller has NVS config, this'll get overwritten by weather
-    // shortly; if not, plain splash is the correct end state.
+    if (menuRequested) {
+        // The caller opens the menu (which renders itself) — don't repaint.
+        return SETUP_MENU;
+    }
+
+    // Idle timeout: repaint the splash so the screen no longer suggests an active
+    // AP. If the caller has NVS config this gets overwritten by weather shortly;
+    // otherwise the splash is the correct end state.
     renderSplash();
+    return SETUP_TIMEOUT;
 }
