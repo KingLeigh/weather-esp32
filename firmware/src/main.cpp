@@ -31,6 +31,7 @@
 
 #include "config.h"
 #include "splash_png.h"
+#include "setup_png.h"
 #include "menu_png.h"
 #include "render.h"
 #include "setup_mode.h"
@@ -88,11 +89,12 @@ enum MenuItem {
     MENU_EXIT          = 3,
 };
 
-// QR overlay placement on the splash. Coordinates match the placeholder box
-// in splash.jsx: the bottom-right column of the layout, vertically centered
-// in the 330-px-tall bottom section (210px below the title + icons).
+// QR overlay placement on the device-setup screen. setup.jsx has no placeholder
+// box — the firmware white-fills this region and centers the QR in it — so this
+// just needs to sit on the right and be vertically centered in the area below
+// the title underline (which is at ~y127 in setup.jsx).
 #define QR_AREA_X      660
-#define QR_AREA_Y      255
+#define QR_AREA_Y      214   // centers the 240px box in the space below the underline
 #define QR_AREA_W      240
 #define QR_AREA_H      240
 // Version 4 (33×33 modules) at ECC_M holds 46 bytes — fits a WiFi-join string
@@ -636,39 +638,43 @@ static void drawQrOverPlaceholder(const char *text) {
     }
 }
 
-void renderSplash(const char *wifiJoinStr) {
-    int rc = png.openRAM((uint8_t *)splash_png, splash_png_len, png_draw_callback);
+// Decode a baked full-screen PNG into the framebuffer, optionally draw the
+// WiFi-join QR over the QR area, and push to the panel. Shared by
+// renderSplash() (onboarding / offline fallback) and renderSetupScreen()
+// (shown while the AP is active).
+static void renderBakedScreen(const uint8_t *pngData, uint32_t pngDataLen,
+                              const char *label, const char *wifiJoinStr) {
+    int rc = png.openRAM((uint8_t *)pngData, pngDataLen, png_draw_callback);
     if (rc != PNG_SUCCESS) {
-        Serial.printf("Splash openRAM failed: %d\n", rc);
+        Serial.printf("%s openRAM failed: %d\n", label, rc);
         return;
     }
-    Serial.printf("Splash: %dx%d, bpp=%d\n",
-                  png.getWidth(), png.getHeight(), png.getBpp());
+    Serial.printf("%s: %dx%d, bpp=%d\n",
+                  label, png.getWidth(), png.getHeight(), png.getBpp());
     rc = png.decode(nullptr, 0);
     png.close();
     if (rc != PNG_SUCCESS) {
-        Serial.printf("Splash decode failed: %d\n", rc);
+        Serial.printf("%s decode failed: %d\n", label, rc);
         return;
     }
 
     if (wifiJoinStr) {
-        Serial.printf("Splash: drawing QR for '%s'\n", wifiJoinStr);
+        Serial.printf("%s: drawing QR for '%s'\n", label, wifiJoinStr);
         drawQrOverPlaceholder(wifiJoinStr);
     }
 
-    // Firmware version + chip ID, bottom-left. Lets the owner read the running
-    // version and the device's channel ID off-screen. Bottom-left is clear of
-    // the QR area (QR_AREA_X=660), so this shows on both the plain splash and
-    // the QR setup screen.
-    char id[13];
-    deviceId(id, sizeof(id));
-    char verText[40];
-    snprintf(verText, sizeof(verText), "v%d  %s", FIRMWARE_VERSION, id);
-    int32_t vx = 10;
-    int32_t vy = EPD_HEIGHT - 12;
-    writeln((GFXfont *)&FiraSans, verText, &vx, &vy, framebuffer);
-
     pushDisplay();
+}
+
+// Onboarding / offline-fallback splash (no AP active). Optionally draws a QR.
+void renderSplash(const char *wifiJoinStr) {
+    renderBakedScreen(splash_png, splash_png_len, "Splash", wifiJoinStr);
+}
+
+// Device-setup screen, shown while the captive-portal AP is up. Draws the
+// WiFi-join QR over the reserved QR area (the PNG has no placeholder box).
+void renderSetupScreen(const char *wifiJoinStr) {
+    renderBakedScreen(setup_png, setup_png_len, "Setup", wifiJoinStr);
 }
 
 // ─── on-device menu ─────────────────────────────────────────────────────────

@@ -534,11 +534,11 @@ void enterSetupMode() {
     Serial.printf("Setup: AP %s SSID='%s' IP=%s\n",
                   apOk ? "up" : "FAILED", apSsid.c_str(), apIp.toString().c_str());
 
-    // Render splash with WiFi-join QR over the placeholder. iOS/Android scan
+    // Render the device-setup screen with the WiFi-join QR. iOS/Android scan
     // this string format as a "join WiFi" intent — one tap and the user's on
     // the AP, captive-portal popup follows.
     String wifiJoin = "WIFI:T:nopass;S:" + apSsid + ";;";
-    renderSplash(wifiJoin.c_str());
+    renderSetupScreen(wifiJoin.c_str());
 
     // DNS hijack: every name resolves to AP IP. Forces phones to load the
     // captive-portal probe from us, which triggers the auto-popup behavior.

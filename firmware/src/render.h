@@ -6,10 +6,14 @@
 
 #pragma once
 
-// Renders the bundled splash PNG to the e-paper. If wifiJoinStr is non-null,
-// also draws a WiFi-join QR code over the splash's QR placeholder area
-// (used when entering setup mode so users can one-tap join the AP).
+// Renders the bundled splash PNG to the e-paper (onboarding / offline
+// fallback). If wifiJoinStr is non-null, also draws a WiFi-join QR over the
+// QR area.
 //
 // Format expected for wifiJoinStr: "WIFI:T:nopass;S:<ssid>;;" for open
 // networks. iOS/Android scan this as a "join WiFi" intent.
 void renderSplash(const char *wifiJoinStr = nullptr);
+
+// Renders the dedicated device-setup PNG with the WiFi-join QR over the QR
+// area. Shown while the captive-portal AP is active (enterSetupMode()).
+void renderSetupScreen(const char *wifiJoinStr);
