@@ -21,7 +21,7 @@ inline constexpr const char *SERVER_BASE_URL =
 // compares it against the worker's X-Firmware-Latest header and self-updates
 // when the worker advertises a newer build. Shown on the setup screen as "vN".
 // Bump on every OTA release.
-inline constexpr int FIRMWARE_VERSION = 7;
+inline constexpr int FIRMWARE_VERSION = 8;
 
 // User button (IO21): wakes the chip from deep sleep via ext0; a long-press
 // (≥ BUTTON_HOLD_MS) enters the menu / setup while a brief tap is ignored.

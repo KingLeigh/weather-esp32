@@ -209,6 +209,35 @@ RTC_DATA_ATTR static bool     battery_low_latched = false;
 // home screen is the splash (vs weather). See WIFI_FAIL_SPLASH_THRESHOLD.
 RTC_DATA_ATTR static uint32_t wifi_fail_streak    = 0;
 RTC_DATA_ATTR static bool     home_is_splash      = false;
+// Recent-errors ring (shown on the debug "Recent Errors" screen), newest first.
+// Consecutive identical failures (same kind+detail, no clean wake between)
+// coalesce into one entry with a count + start time, so a sustained outage is a
+// single tallied line rather than a wall of repeats; distinct failures and new
+// incidents get their own chronological entries. The error KINDS are exhaustive
+// (see ErrKind) so this screen surfaces more than the on-screen status bar does.
+// Survives deep sleep; cleared on a true power-off.
+enum ErrKind : uint8_t {
+    EK_NET = 0,    // WiFi connect failed
+    EK_HTTP,       // server returned non-200 (detail = HTTP status)
+    EK_TRANSPORT,  // HTTPClient negative code: DNS / connect / TLS / timeout (detail = code)
+    EK_EMPTY,      // no Content-Length / chunked response
+    EK_OOM,        // PSRAM alloc for the PNG failed
+    EK_TRUNCATED,  // short read — connection dropped mid-download
+    EK_DECODE,     // PNG decode failed (detail = PNGdec rc)
+    EK_NTP,        // NTP sync timed out (clock / staleness unreliable)
+    EK_OTA,        // OTA flash failed (detail = httpUpdate error)
+};
+struct ErrEntry {
+    uint32_t firstEpoch;  // first occurrence of this run (unix time; 0 = clock not synced)
+    uint16_t count;       // consecutive occurrences coalesced into this entry
+    uint8_t  code;        // ErrKind
+    int16_t  detail;      // see ErrKind comments
+};
+#define ERR_RING_SIZE 10
+RTC_DATA_ATTR static ErrEntry err_ring[ERR_RING_SIZE];
+RTC_DATA_ATTR static uint8_t  err_head         = 0;  // next write slot (ring head)
+RTC_DATA_ATTR static uint8_t  err_count        = 0;  // valid entries (<= SIZE)
+RTC_DATA_ATTR static bool     last_wake_failed = false;  // did the previous wake log an error
 RTC_DATA_ATTR static uint32_t boot_count          = 0;
 // Set after we render the splash for a no-config / offline state, so we don't
 // re-flash the same splash on every wake (visible refresh + power cost).
@@ -234,6 +263,13 @@ static int32_t   pngLen     = 0;
 static char      updatedStr[32] = {0};  // X-Updated header value
 static int       lastHttpCode   = 0;    // HTTP status from the last fetchPng()
 static int       latestFirmwareAvail = 0;  // X-Firmware-Latest from the weather fetch
+
+// Failure detail captured by the wake flow, consumed by logError() (see ErrKind).
+static uint8_t   g_fetchFail   = EK_HTTP; // why the last fetch failed (ErrKind)
+static int       g_fetchDetail = 0;       // HTTP / transport code for that failure
+static bool      g_ntpSynced   = true;    // did NTP sync this wake (set by connectWiFi)
+static int       g_decodeRc    = 0;       // PNGdec return code on a decode failure
+static int       g_otaError    = 0;       // httpUpdate error on an OTA failure
 
 // ─── simple hash (djb2) ─────────────────────────────────────────────────────
 
@@ -321,11 +357,13 @@ static bool connectWiFi(const char *ssid, const char *password) {
         Serial.print(".");
     }
     if (getLocalTime(&ti, 0)) {
+        g_ntpSynced = true;
         Serial.printf(" OK (%lu ms)  %04d-%02d-%02dT%02d:%02d:%02d\n",
                       millis() - ntpStart,
                       ti.tm_year + 1900, ti.tm_mon + 1, ti.tm_mday,
                       ti.tm_hour, ti.tm_min, ti.tm_sec);
     } else {
+        g_ntpSynced = false;
         Serial.printf(" TIMEOUT after %lu ms — staleness may be inaccurate\n",
                       millis() - ntpStart);
     }
@@ -377,12 +415,14 @@ static bool applyOtaUpdate(int latestVersion) {
             return true;  // not reached
         case HTTP_UPDATE_NO_UPDATES:
             Serial.println("OTA: server reported no update.");
+            g_otaError = 0;
             return false;
         case HTTP_UPDATE_FAILED:
         default:
             Serial.printf("OTA: update FAILED (%d): %s\n",
                           httpUpdate.getLastError(),
                           httpUpdate.getLastErrorString().c_str());
+            g_otaError = httpUpdate.getLastError();
             return false;
     }
 }
@@ -468,6 +508,43 @@ static int computeStatus(bool net_failed, bool srv_failed, int age_min, bool bat
     return ST_NONE;
 }
 
+// Record a wake's outcome into the recent-errors ring. Consecutive identical
+// failures coalesce into the most-recent entry (count++, keep first-seen time);
+// a different failure — or a success — starts a fresh incident. Called once per
+// normal-weather wake (not from the debug screen's own test fetch). Only the
+// connectivity failures are logged (NET / SRV); OLD/BAT are states, not errors.
+// Set by logError() during a wake; persisted into last_wake_failed before sleep
+// so the next wake knows whether the previous one failed (for coalescing). RAM,
+// so it resets to false on every wake.
+static bool wakeHadError = false;
+
+// Append a failure to the recent-errors ring (newest at the head). Consecutive
+// identical failures — same kind+detail, with no clean wake in between — coalesce
+// into the head entry (count++, keep the start time) so a sustained outage is one
+// tallied line; a different failure or one after a clean wake starts a new entry.
+static void logError(uint8_t kind, int16_t detail) {
+    time_t now;
+    time(&now);
+    uint32_t epoch = (now > 1700000000) ? (uint32_t)now : 0;  // 0 if the clock isn't synced
+
+    if (last_wake_failed && err_count > 0) {
+        ErrEntry &head = err_ring[(err_head + ERR_RING_SIZE - 1) % ERR_RING_SIZE];
+        if (head.code == kind && head.detail == detail) {
+            if (head.count < 0xFFFF) head.count++;
+            wakeHadError = true;
+            return;
+        }
+    }
+    ErrEntry &e = err_ring[err_head];
+    e.firstEpoch = epoch;
+    e.count      = 1;
+    e.code       = kind;
+    e.detail     = detail;
+    err_head = (err_head + 1) % ERR_RING_SIZE;
+    if (err_count < ERR_RING_SIZE) err_count++;
+    wakeHadError = true;
+}
+
 // Stamps the status code in the reserved corner, or nothing if ST_NONE. The
 // server keeps this region empty, so on a full refresh it is already blank.
 static void drawStatus(int status) {
@@ -529,6 +606,8 @@ static bool fetchPng(const char *url) {
 
     if (httpCode != HTTP_CODE_OK) {
         Serial.printf("HTTP error: %d\n", httpCode);
+        g_fetchFail = (httpCode > 0) ? EK_HTTP : EK_TRANSPORT;  // real HTTP vs transport error
+        g_fetchDetail = httpCode;
         http.end();
         return false;
     }
@@ -550,6 +629,7 @@ static bool fetchPng(const char *url) {
     Serial.printf("Content-Length: %d bytes\n", contentLen);
     if (contentLen <= 0) {
         Serial.println("No content or chunked (unsupported)");
+        g_fetchFail = EK_EMPTY; g_fetchDetail = 0;
         http.end();
         return false;
     }
@@ -557,6 +637,7 @@ static bool fetchPng(const char *url) {
     pngBuf = (uint8_t *)ps_malloc(contentLen);
     if (!pngBuf) {
         Serial.println("PSRAM alloc failed");
+        g_fetchFail = EK_OOM; g_fetchDetail = 0;
         http.end();
         return false;
     }
@@ -582,6 +663,7 @@ static bool fetchPng(const char *url) {
 
     if (pngLen != contentLen) {
         Serial.printf("Short read: %d of %d\n", pngLen, contentLen);
+        g_fetchFail = EK_TRUNCATED; g_fetchDetail = 0;
         free(pngBuf); pngBuf = nullptr; pngLen = 0;
         return false;
     }
@@ -595,6 +677,7 @@ static bool decodePng() {
     int rc = png.openRAM(pngBuf, pngLen, png_draw_callback);
     if (rc != PNG_SUCCESS) {
         Serial.printf("PNG openRAM failed: %d\n", rc);
+        g_decodeRc = rc;
         return false;
     }
     Serial.printf("PNG: %dx%d, bpp=%d, type=%d\n",
@@ -605,6 +688,7 @@ static bool decodePng() {
     png.close();
     if (rc != PNG_SUCCESS) {
         Serial.printf("PNG decode failed: %d\n", rc);
+        g_decodeRc = rc;
         return false;
     }
     Serial.printf("Decoded in %lu ms\n", millis() - t0);
@@ -855,7 +939,6 @@ static ConfirmResult confirmFactoryReset() {
 // server PNG) so it works precisely when WiFi/server is unreachable. Reuses the
 // normal wake's connectWiFi()/fetchPng() so it exercises the real code path.
 
-enum DebugResult { DEBUG_BACK, DEBUG_TIMEOUT };
 enum WifiState   { WS_PENDING, WS_OK, WS_FAIL, WS_NA };
 enum ServerState { SS_PENDING, SS_OK, SS_HTTPFAIL, SS_NA };
 
@@ -1035,15 +1118,94 @@ static void runDebugPass(const DeviceConfig &cfg, bool hasConfig) {
 // Debug live-test screen. Runs a pass, then waits: any press (short or long)
 // returns to the menu, idle exits home (matches the menu idle rule). Assumes
 // the framebuffer is already allocated.
-static DebugResult runDebugScreen(const DeviceConfig &cfg, bool hasConfig) {
+// Runs the live test, then waits. Returns true if the user pressed (→ advance to
+// the Recent Errors screen), false on idle timeout (→ home).
+static bool runDebugScreen(const DeviceConfig &cfg, bool hasConfig) {
     runDebugPass(cfg, hasConfig);
 
     unsigned long start = millis();
     while (millis() - start < MENU_IDLE_TIMEOUT_MS) {
-        if (readButtonEvent() != BTN_NONE) return DEBUG_BACK;  // any press → menu
+        if (readButtonEvent() != BTN_NONE) return true;  // any press → Recent Errors
         delay(20);
     }
-    return DEBUG_TIMEOUT;  // idle → home
+    return false;  // idle → home
+}
+
+// ─── Recent Errors screen ────────────────────────────────────────────────────
+
+// Concise human text for a logged error code + detail.
+static void errorText(uint8_t code, int16_t detail, char *buf, size_t n) {
+    switch (code) {
+        case EK_NET:       snprintf(buf, n, "WiFi connect failed"); break;
+        case EK_HTTP:      snprintf(buf, n, "Server HTTP %d", detail); break;
+        case EK_TRANSPORT:
+            if (detail == -11)     snprintf(buf, n, "Server timeout");        // READ_TIMEOUT
+            else if (detail == -1) snprintf(buf, n, "Server no connection");  // CONNECTION_REFUSED
+            else                   snprintf(buf, n, "Server net error (%d)", detail);
+            break;
+        case EK_EMPTY:     snprintf(buf, n, "Empty/chunked response"); break;
+        case EK_OOM:       snprintf(buf, n, "Out of memory (PNG)"); break;
+        case EK_TRUNCATED: snprintf(buf, n, "Download truncated"); break;
+        case EK_DECODE:    snprintf(buf, n, "Image decode failed (%d)", detail); break;
+        case EK_NTP:       snprintf(buf, n, "Clock not synced (NTP)"); break;
+        case EK_OTA:       snprintf(buf, n, "Update failed (E%d)", detail); break;
+        default:           snprintf(buf, n, "Error %u", code); break;
+    }
+}
+
+// Relative age of a logged timestamp: "5m ago" / "2h ago" / "3d ago"; "--" if
+// the clock wasn't synced (then or now).
+static void relTime(uint32_t epoch, char *buf, size_t n) {
+    time_t now;
+    time(&now);
+    if (epoch == 0 || now < 1700000000 || (uint32_t)now < epoch) {
+        snprintf(buf, n, "--");
+        return;
+    }
+    uint32_t s = (uint32_t)now - epoch;
+    if (s < 3600UL)         snprintf(buf, n, "%lum ago", (unsigned long)(s / 60));
+    else if (s < 360000UL)  snprintf(buf, n, "%luh ago", (unsigned long)(s / 3600));  // up to 99h
+    else                    snprintf(buf, n, "%lud ago", (unsigned long)(s / 86400));
+}
+
+static void drawRecentErrors() {
+    memset(framebuffer, 0xFF, EPD_WIDTH * EPD_HEIGHT / 2);
+    int32_t x = 60, y = 64;
+    writeln((GFXfont *)&FiraSans, "Recent Errors", &x, &y, framebuffer);
+    epd_fill_rect(60, 92, EPD_WIDTH - 120, 3, OVERLAY_COLOR_MUTED, framebuffer);
+
+    if (err_count == 0) {
+        x = 60; y = 150;
+        writeln((GFXfont *)&FiraSans, "No recent errors.", &x, &y, framebuffer);
+        pushDisplay();
+        return;
+    }
+
+    char line[80], when[16], what[48];
+    const int32_t STEP = 46, BOTTOM = 524;  // ~9 lines fit before the panel edge
+    y = 150;
+    for (int i = 0; i < err_count && y <= BOTTOM; i++) {  // newest first
+        int idx = (err_head + ERR_RING_SIZE - 1 - i) % ERR_RING_SIZE;
+        ErrEntry &e = err_ring[idx];
+        relTime(e.firstEpoch, when, sizeof(when));
+        errorText(e.code, e.detail, what, sizeof(what));
+        if (e.count > 1) snprintf(line, sizeof(line), "%s   %s  x%u", when, what, e.count);
+        else             snprintf(line, sizeof(line), "%s   %s", when, what);
+        x = 60;
+        writeln((GFXfont *)&FiraSans, line, &x, &y, framebuffer);
+        y += STEP;
+    }
+    pushDisplay();
+}
+
+// Recent Errors screen: any press → home, idle → home (both just return).
+static void runRecentErrorsScreen() {
+    drawRecentErrors();
+    unsigned long start = millis();
+    while (millis() - start < MENU_IDLE_TIMEOUT_MS) {
+        if (readButtonEvent() != BTN_NONE) return;  // any press → home
+        delay(20);
+    }
 }
 
 // On-device menu. Short press cycles the cursor, long press selects. Returns on
@@ -1120,15 +1282,15 @@ static void enterMenuMode(const DeviceConfig &cfg, bool hasConfig) {
                     break;
                 }
                 case MENU_DEBUG: {
+                    // Live test → (any press) Recent Errors → (any press) home.
+                    // Idle on either screen also goes home.
                     Serial.println("Menu: entering debug live test.");
-                    DebugResult dr = runDebugScreen(cfg, hasConfig);
-                    if (dr == DEBUG_TIMEOUT) {
-                        Serial.println("Debug idle timeout — exiting menu.");
-                        return;  // idle → go home (weather / splash)
+                    if (runDebugScreen(cfg, hasConfig)) {
+                        Serial.println("Debug: press — showing Recent Errors.");
+                        runRecentErrorsScreen();
                     }
-                    Serial.println("Debug: back to menu.");
-                    renderMenu(selected);  // active back → redraw menu
-                    break;
+                    Serial.println("Debug: exiting to home.");
+                    return;  // go home (weather / splash)
                 }
                 default:  // any future not-yet-wired item
                     showComingSoon();
@@ -1348,6 +1510,18 @@ void setup() {
     // intermittent WiFi never trips the fallback — only a sustained outage.
     wifi_fail_streak = wifiOk ? 0 : (wifi_fail_streak + 1);
 
+    // Record this wake's failure (if any) for the "Recent Errors" debug screen.
+    // These are mutually exclusive per wake: no WiFi → NET; WiFi but the fetch
+    // failed → the specific fetch reason; otherwise a synced-clock miss → NTP.
+    // (Decode and OTA failures are logged at their own points further down.)
+    if (!wifiOk) {
+        logError(EK_NET, 0);
+    } else if (!fetchOk) {
+        logError(g_fetchFail, (int16_t)g_fetchDetail);
+    } else if (!g_ntpSynced) {
+        logError(EK_NTP, 0);
+    }
+
     // ── Change detection ─────────────────────────────────────────────────
     uint32_t newHash = fetchOk ? hashBytes(pngBuf, pngLen) : prev_png_hash;
     bool pngChanged    = (newHash != prev_png_hash);
@@ -1358,7 +1532,13 @@ void setup() {
                   newHash, prev_png_hash, pngChanged, statusChanged,
                   (unsigned)wifi_fail_streak, home_is_splash ? "splash" : "weather");
 
-    if (fetchOk && decodePng()) {
+    bool decoded = fetchOk && decodePng();
+    if (fetchOk && !decoded) {
+        // Got PNG bytes but couldn't render them (corrupt image) — log IMG and
+        // fall through to the no-fresh-weather handling below.
+        logError(EK_DECODE, (int16_t)g_decodeRc);
+    }
+    if (decoded) {
         // Fresh weather. Repaint if anything changed, on first boot, or when
         // coming back from the splash (which is currently the home screen).
         if (firstBoot || pngChanged || statusChanged || home_is_splash) {
@@ -1419,6 +1599,7 @@ void setup() {
         if (!applyOtaUpdate(latestFirmwareAvail)) {
             ota_failed_version   = latestFirmwareAvail;
             ota_retry_after_boot = boot_count + OTA_FAIL_COOLDOWN_WAKES;
+            logError(EK_OTA, (int16_t)g_otaError);
             Serial.printf("OTA: v%d failed — cooling down %d wakes (retry at boot #%u)\n",
                           latestFirmwareAvail, OTA_FAIL_COOLDOWN_WAKES,
                           (unsigned)ota_retry_after_boot);
@@ -1431,6 +1612,9 @@ void setup() {
     // battery (we've given up for now — no point retrying every 5 min).
     uint32_t sleepMin = home_is_splash ? RECOVERY_SLEEP_MINUTES
                       : (fetchOk ? SLEEP_MINUTES : RETRY_SLEEP_MINUTES);
+    // Remember whether this wake logged any error, so the next wake's logError()
+    // can coalesce a continuing failure (vs starting a new incident after a clean wake).
+    last_wake_failed = wakeHadError;
     enterDeepSleep(/*armTimer=*/true, sleepMin);
 }
 
