@@ -19,6 +19,9 @@ Shipped: **Exit**, **Device setup** (the existing captive-portal onboarding),
 the firmware version with "up to date" / "update available"), and a
 **partial-refresh cursor** (a move repaints only the cursor column instead of the
 whole screen, with a full refresh on wrap-to-top to clear e-paper ghosting).
+Since then: a **dedicated setup screen** split from the splash (v6), and
+**long-press from the setup screen → menu** (v7) so Debug / Factory reset are
+reachable even from a bad-WiFi state.
 Remaining:
 - **Debug logs / failure ring buffer** — a persisted (RTC) history of the last
   ~5–10 failures with timestamps + live diagnostics (RSSI, fail counts, last-good
@@ -35,8 +38,6 @@ Remaining:
   `readButtonEvent()` (returns `BTN_LONG` only after release) and `enterMenuMode()`
   (its opening `while (digitalRead == LOW)` defers `renderMenu` until release).
   Consider also dropping `BUTTON_HOLD_MS` (1500 ms) once there's instant feedback.
-- **Setup-screen text rework** (the splash doubles as the onboarding and setup-QR
-  screen) and a broader **menu-flow / back-out UX** pass.
 
 ### Status codes below the weather — ✅ Shipped (v5)
 Replaced the single staleness *time* badge ("33m") and the always-on battery icon
@@ -62,35 +63,28 @@ Follow-ups:
   untrustworthy). Both slot into the existing priority list.
 - **`OLD` while offline** — needs the last-good `X-Updated` persisted in RTC (today
   `OLD` only shows on a successful fetch).
-- **Offline → splash fallback.** After a prolonged offline stretch, repaint a
-  splash instead of holding stale weather forever; also the backstop that clears
-  any partial-refresh ghosting.
+- **Offline → splash fallback** — ✅ **shipped (v7)**: after ~3h offline a
+  configured device drops to the splash with a "WiFi network unavailable" message,
+  rechecks every 30 min, and restores weather on reconnect. Also clears any
+  partial-refresh ghosting.
 
 ### OTA (over-the-air) firmware updates — ✅ Shipped
 The device pulls and flashes new firmware from the worker over WiFi — validated
-end-to-end (devices have self-updated v1→v2 and v2→v3 over the air). Discovery is
-**free and every wake**: the worker advertises the latest available version on
-every weather response via the `X-Firmware-Latest` header, and the device flashes a
-newer build *after* rendering the weather (no separate request, no once/day
-throttle). Release flow + scripts are in `docs/ota.md` and
-`firmware/scripts/ota-{publish,promote,add-fast-device}.sh`.
-
-Fast/slow release channels still exist server-side (resolved by chip ID on the
-legacy `/firmware/check` endpoint, which pre-piggyback firmware uses to bootstrap
-onto a piggyback build), but current firmware **skips channel resolution** — the
-weather header always reports the *fast* version, so every updated device tracks
-fast.
+end-to-end. Discovery is **free and every wake**: the worker advertises the latest
+available version on every weather response via the `X-Firmware-Latest` header
+(read from the `firmware:latest` KV key), and the device flashes a newer build
+*after* rendering the weather (no separate request, no throttle). There is a
+**single release stream** — `ota-publish.sh` bumps `firmware:latest` and every
+device picks it up on its next wake. (The earlier fast/slow channel scheme and the
+`/firmware/check` endpoint were removed 2026-06-24.) Release flow + the one script
+are in `docs/ota.md` and `firmware/scripts/ota-publish.sh`.
 
 Follow-ups:
 - **Migrate binary storage from KV to R2.** The binary currently lives in Cloudflare
-  KV (`firmware:bin:{version}`, ~1.1 MB) as an interim measure — R2 wasn't enabled on
+  KV (`firmware:bin:{version}`, ~1.2 MB) as an interim measure — R2 wasn't enabled on
   the account. Move it to a dedicated R2 bucket (`weather-esp32-firmware`) once R2 is
   available; the device-facing `/firmware/{version}.bin` URL is unchanged, so only the
   worker's read and the `ota-publish.sh` upload change.
-- **Per-device channels on the weather header.** Restore the fast/slow split for the
-  piggyback path (e.g. send the chip ID on the weather fetch and resolve the channel
-  server-side) so gifted devices can lag a canary again. `ota-promote.sh` no longer
-  gates current devices until this lands.
 - **OTA diagnostics + manual control on-device.**
   - **Force-retry an update** — a way to bypass the failure cooldown and re-attempt
     on demand (e.g. from the menu), instead of waiting out `OTA_FAIL_COOLDOWN_WAKES`.
