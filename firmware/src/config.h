@@ -17,10 +17,10 @@
 inline constexpr const char *SERVER_BASE_URL =
     "https://weather-esp32.leigh-herbert.workers.dev";
 
-// Compiled-in firmware version. Integer, monotonically increasing. Sent to the
-// worker's /firmware/check endpoint as the `current` query param so the worker
-// can decide whether a newer build is available for this device's channel.
-// Displayed on the splash/setup screen as "vN". Bump on every OTA release.
+// Compiled-in firmware version. Integer, monotonically increasing. The device
+// compares it against the worker's X-Firmware-Latest header and self-updates
+// when the worker advertises a newer build. Shown on the setup screen as "vN".
+// Bump on every OTA release.
 inline constexpr int FIRMWARE_VERSION = 7;
 
 // User button (IO21): wakes the chip from deep sleep via ext0; a long-press

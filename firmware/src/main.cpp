@@ -122,8 +122,8 @@ enum MenuItem {
 
 // OTA updates are discovered for free: the worker advertises the latest
 // available firmware version on every weather response (X-Firmware-Latest),
-// which fetchPng() captures into latestFirmwareAvail. No separate
-// /firmware/check request and no once-a-day throttle — see applyOtaUpdate().
+// which fetchPng() captures into latestFirmwareAvail. No separate version-check
+// request and no once-a-day throttle — see applyOtaUpdate().
 //
 // If a flash attempt fails, that version is skipped for this many wakes before
 // being retried — a transient error must not permanently block updates, so the
@@ -340,9 +340,9 @@ static void disconnectWiFi() {
 
 // ─── device identity ─────────────────────────────────────────────────────────
 
-// Stable per-chip ID: the eFuse MAC formatted as lowercase 12-char hex. Used as
-// the X-Device-Id header so the worker can route this device to a release
-// channel (fast/slow). Written into `buf` (must be >= 13 bytes).
+// Stable per-chip ID: the eFuse MAC formatted as lowercase 12-char hex. Shown
+// on the debug screen and logged over serial. Written into `buf` (must be >= 13
+// bytes).
 static void deviceId(char *buf, size_t bufSize) {
     snprintf(buf, bufSize, "%012llx", ESP.getEfuseMac());
 }
@@ -355,8 +355,7 @@ static void deviceId(char *buf, size_t bufSize) {
 //
 // Discovery is free: the worker advertises the latest available version on every
 // weather response (X-Firmware-Latest, captured by fetchPng), so there's no
-// separate /firmware/check request or once-a-day throttle. The /firmware/check
-// endpoint still exists for manual/explicit checks.
+// separate version-check request or once-a-day throttle.
 static bool applyOtaUpdate(int latestVersion) {
     String url = String(SERVER_BASE_URL) + "/firmware/" + latestVersion + ".bin";
     Serial.printf("OTA: v%d > v%d — downloading %s\n",
@@ -1198,7 +1197,7 @@ void setup() {
                   boot_count, (int)wakeup);
 
     // Print firmware version + device ID once so the owner can read them over
-    // serial (the device ID is also the OTA channel key sent to the worker).
+    // serial.
     {
         char id[13];
         deviceId(id, sizeof(id));

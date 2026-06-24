@@ -98,16 +98,6 @@ export default {
       return jsonResponse(slim);
     }
 
-    // GET /firmware/check?current={N} — OTA version check.
-    // The device sends its compiled-in FIRMWARE_VERSION as `current` and its
-    // efuse MAC as the X-Device-Id header. We resolve a release channel (fast
-    // for opted-in device ids, slow for everyone else), look up that channel's
-    // latest version, and tell the device whether to update. The device acts
-    // solely on the presence of a non-empty X-Firmware-Url header.
-    if (url.pathname === '/firmware/check' && request.method === 'GET') {
-      return handleFirmwareCheck(request, env, url);
-    }
-
     // GET /firmware/{version}.bin — serve a firmware binary from KV.
     // (Stored in KV for now; migrate to R2 once it's enabled on the account —
     // see ROADMAP.md. The device-facing URL is identical either way.)
@@ -280,48 +270,6 @@ async function handleAdminPost(request, env) {
   return jsonResponse({ error: `Unknown action: ${action}` }, 400);
 }
 
-// ─── firmware OTA ────────────────────────────────────────────────────────────
-
-/**
- * Resolve the OTA release channel for a device and report the latest version.
- *
- * Channel = "fast" if the device id is in the firmware:fast_devices KV array,
- * else "slow". The channel's latest version comes from
- * firmware:channel:{channel} (absent ⇒ 0). The device updates only when the
- * latest version M is greater than its reported current version N, which it
- * detects by the presence of a non-empty X-Firmware-Url header.
- */
-async function handleFirmwareCheck(request, env, url) {
-  const deviceId = request.headers.get('X-Device-Id');
-  const current = parseInt(url.searchParams.get('current'), 10) || 0;
-
-  const fastDevices = (await env.WEATHER_KV.get('firmware:fast_devices', 'json')) || [];
-  const channel = deviceId && fastDevices.includes(deviceId) ? 'fast' : 'slow';
-
-  const latest = parseInt(await env.WEATHER_KV.get(`firmware:channel:${channel}`, 'text'), 10) || 0;
-  const update = latest > current;
-  const updateUrl = update ? `/firmware/${latest}.bin` : null;
-
-  const headers = {
-    'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': '*',
-    'X-Firmware-Channel': channel,
-    'X-Firmware-Latest': String(latest),
-  };
-  if (updateUrl) {
-    headers['X-Firmware-Url'] = updateUrl;
-  }
-
-  return new Response(
-    JSON.stringify(
-      { channel, latest, current, update, url: updateUrl },
-      null,
-      2,
-    ),
-    { status: 200, headers },
-  );
-}
-
 // ─── weather fetch + serve ───────────────────────────────────────────────────
 
 async function serveWeatherPng(env, loc) {
@@ -329,10 +277,10 @@ async function serveWeatherPng(env, loc) {
     const [cachedPng, cachedUpdated, fwLatest] = await Promise.all([
       env.WEATHER_KV.get(`render_png:${loc.zip}`, 'arrayBuffer'),
       env.WEATHER_KV.get(`render_updated:${loc.zip}`, 'text'),
-      // Latest available firmware (fast channel) — advertised on every weather
-      // response so the device discovers OTA updates for free. Channels are
-      // skipped for now: every device is treated as "fast".
-      env.WEATHER_KV.get('firmware:channel:fast', 'text'),
+      // Latest available firmware — advertised on every weather response so the
+      // device discovers OTA updates for free (it self-updates when this exceeds
+      // its own FIRMWARE_VERSION).
+      env.WEATHER_KV.get('firmware:latest', 'text'),
     ]);
 
     const firmwareLatest = parseInt(fwLatest, 10) || 0;
@@ -392,9 +340,8 @@ function pngResponse(pngBytes, updated, firmwareLatest = 0) {
     headers: {
       'Content-Type': 'image/png',
       'X-Updated': updated,
-      // Latest firmware version available to this device (fast channel). The
-      // device compares it to its own FIRMWARE_VERSION and self-updates if newer
-      // — free OTA discovery, no separate /firmware/check request needed.
+      // Latest available firmware version. The device compares it to its own
+      // FIRMWARE_VERSION and self-updates if newer — free OTA discovery.
       'X-Firmware-Latest': String(firmwareLatest),
       'Cache-Control': 'public, max-age=300',
       'Access-Control-Allow-Origin': '*',

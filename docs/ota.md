@@ -5,35 +5,12 @@ gifted device never needs to be plugged in again. The Cloudflare Worker serves
 the firmware binary and advertises the latest available version on every weather
 response (`X-Firmware-Latest`); the device reads that header on each wake and
 self-updates — right after rendering the weather — when a newer version is
-available. (See the **Update discovery** note below for how this relates to the
-release **channels** described next.)
+available.
 
-There are two channels:
-
-- **fast** — your own test device(s). Gets every new build immediately.
-- **slow** — everyone else. Gets a build only after you've vetted it on fast
-  and promoted it.
-
-Which channel a device follows is resolved by its **chip ID** (`ESP.getEfuseMac()`
-as a lowercase 12-char hex string). A device whose chip ID is in the
-`firmware:fast_devices` allowlist follows the fast channel; all others follow
-slow.
-
-> **Update discovery (current firmware).** The device no longer polls
-> `/firmware/check`. Instead the worker advertises the latest available version
-> on **every weather response** via the `X-Firmware-Latest` header, and the
-> device self-updates after rendering the weather if that version is newer than
-> its own. Discovery is therefore free (no extra request) and effectively every
-> wake.
->
-> For now this **skips chip-ID channel resolution**: the header always reports
-> the **fast** channel version, so every updated device tracks fast. The
-> fast/slow split and `firmware:fast_devices` still exist server-side and still
-> govern the legacy `/firmware/check` endpoint (used by pre-piggyback firmware
-> to bootstrap onto this build), but current firmware ignores them. Practical
-> effect: **`ota-promote.sh` (fast → slow) no longer gates current devices** —
-> they update as soon as you publish to fast. Re-introducing per-device channels
-> on the weather header is a future item (see `ROADMAP.md`).
+Discovery is therefore free (no extra request) and effectively every wake. There
+is a single release stream: publish a version and every device picks it up on its
+next wake. (A staged fast/slow channel scheme existed earlier but was removed —
+see `ROADMAP.md` history.)
 
 ## How it's stored
 
@@ -41,20 +18,17 @@ Everything lives in Cloudflare KV (binding `WEATHER_KV`):
 
 | Key | Value |
 | --- | --- |
-| `firmware:channel:fast` | version number as a string, e.g. `"3"` |
-| `firmware:channel:slow` | version number as a string |
-| `firmware:fast_devices` | JSON array of device-id strings, e.g. `["a1b2c3d4e5f6"]` |
-| `firmware:bin:{version}` | the firmware binary (~1.1 MB) for that integer version |
+| `firmware:latest` | latest version number as a string, e.g. `"7"` |
+| `firmware:bin:{version}` | the firmware binary (~1.2 MB) for that integer version |
 
 > **Interim storage note:** the binary is kept in KV for now (it fits KV's 25 MB
 > per-value limit). The intended long-term home is a dedicated R2 bucket,
 > deferred until R2 is enabled on the account — see `ROADMAP.md`.
 
-The single source of truth for the version number is
-`firmware/src/config.h`:
+The single source of truth for the version number is `firmware/src/config.h`:
 
 ```c
-inline constexpr int FIRMWARE_VERSION = 5;
+inline constexpr int FIRMWARE_VERSION = 7;
 ```
 
 Bump this integer (monotonically) for every release. `ota-publish.sh` reads it.
@@ -63,7 +37,7 @@ Bump this integer (monotonically) for every release. `ota-publish.sh` reads it.
 
 Do these once, before gifting any device.
 
-1. **Authenticate wrangler** (needed by all the scripts below):
+1. **Authenticate wrangler** (needed by the publish script):
 
    ```sh
    cd worker
@@ -90,65 +64,35 @@ For each new release:
 1. **Bump the version.** Edit `firmware/src/config.h` and increment
    `FIRMWARE_VERSION`.
 
-2. **Publish to the fast channel.** This builds (with `--build`), uploads the
-   binary to KV as `firmware:bin:{version}`, and points
-   `firmware:channel:fast` at the new version:
+2. **Publish.** This builds (with `--build`), uploads the binary to KV as
+   `firmware:bin:{version}`, and points `firmware:latest` at the new version:
 
    ```sh
-   bash firmware/scripts/ota-publish.sh --channel fast --build
+   bash firmware/scripts/ota-publish.sh --build
    ```
 
-   `--channel` defaults to `fast`, so `--build` alone is enough. Omit `--build`
-   if you've already built the binary.
-
-   Preview exactly what it will do without touching anything:
+   Omit `--build` if you've already built the binary. Preview exactly what it
+   will do without touching anything:
 
    ```sh
-   bash firmware/scripts/ota-publish.sh --channel fast --dry-run
+   bash firmware/scripts/ota-publish.sh --dry-run
    ```
 
-3. **Verify on your own device.** Your test device (see
-   [Adding a fast device](#adding-a-fast-device)) follows the fast channel and
-   will pick up the new build on its next update check. Confirm it boots,
-   renders, and behaves.
-
-4. **Promote fast → slow.** Once vetted, ship the *exact same* version to every
-   other device. This reads `firmware:channel:fast` and copies that version
-   number to `firmware:channel:slow` — no rebuild, no re-upload:
-
-   ```sh
-   bash firmware/scripts/ota-promote.sh
-   ```
-
-The two channels staging the same binary means slow-channel devices only ever
-receive a build you've actually run.
-
-## Adding a fast device
-
-To put a device on the fast channel, you need its chip ID — the lowercase
-12-char hex string shown on the setup screen and printed to the serial console
-on boot.
-
-```sh
-bash firmware/scripts/ota-add-fast-device.sh a1b2c3d4e5f6
-```
-
-This reads `firmware:fast_devices` (defaulting to `[]` if it doesn't exist
-yet), appends the id (deduped), and writes the array back.
+3. **Verify.** Every device picks up the new build on its next wake (fetch
+   weather → see `X-Firmware-Latest` is newer → download → reboot). Confirm your
+   device boots, renders, and behaves; the debug screen's version line shows what
+   it's running.
 
 ## Script reference
 
-All scripts live in `firmware/scripts/` and `cd` into `worker/` internally so
-`--binding=WEATHER_KV` resolves from `worker/wrangler.toml`. They expect
+`firmware/scripts/ota-publish.sh` `cd`s into `worker/` internally so
+`--binding=WEATHER_KV` resolves from `worker/wrangler.toml`. It expects
 `wrangler login` to have been run.
 
-### `ota-publish.sh`
-
 ```
-ota-publish.sh [--channel fast|slow] [--build] [--version N] [--dry-run]
+ota-publish.sh [--build] [--version N] [--dry-run]
 ```
 
-- `--channel fast|slow` — channel to point at this version (default `fast`).
 - `--build` — run `pio run -e firmware` before uploading.
 - `--version N` — override the version (default: grep `FIRMWARE_VERSION` from
   `firmware/src/config.h`).
@@ -156,21 +100,4 @@ ota-publish.sh [--channel fast|slow] [--build] [--version N] [--dry-run]
   without running them.
 
 Uploads `firmware/.pio/build/firmware/firmware.bin` to KV as
-`firmware:bin:{version}` and sets `firmware:channel:{channel}` to the version.
-
-### `ota-promote.sh`
-
-```
-ota-promote.sh
-```
-
-Reads `firmware:channel:fast` and writes that version to
-`firmware:channel:slow`.
-
-### `ota-add-fast-device.sh`
-
-```
-ota-add-fast-device.sh {deviceId}
-```
-
-Appends a chip ID to the `firmware:fast_devices` allowlist (deduped).
+`firmware:bin:{version}` and sets `firmware:latest` to the version.
