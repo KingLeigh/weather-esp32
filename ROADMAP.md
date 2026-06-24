@@ -23,12 +23,12 @@ Since then: a **dedicated setup screen** split from the splash (v6), and
 **long-press from the setup screen → menu** (v7) so Debug / Factory reset are
 reachable even from a bad-WiFi state.
 Remaining:
-- **Debug logs / failure ring buffer** — a persisted (RTC) history of the last
-  ~5–10 failures with timestamps + live diagnostics (RSSI, fail counts, last-good
-  fetch). Drawn on-device since it matters most when offline. This is also where
-  `SRV` finally gets disambiguated: store `lastHttpCode` per entry so 404 (bad
-  path) vs 5xx (dead worker) vs a negative transport error are distinguishable.
-  Likely the point to extract the menu into its own `menu.cpp`.
+- **Debug logs / failure ring buffer** — ✅ **shipped (v8)**: the on-device
+  "Recent Errors" screen (Debug live test → press → Recent Errors). A persisted
+  (RTC) chronological log of recent failures, consecutive repeats coalesced with
+  a count + start time, with exhaustive kinds beyond the status bar's NET/SRV
+  (HTTP status, transport code, empty/chunked, OOM, truncated, decode/IMG, NTP,
+  OTA). Still deferred: extracting the menu/debug code into its own `menu.cpp`.
 - **Long-press fires on threshold, not release** — today the long-press action
   (and the wake→menu paint) waits for you to *release* the button, so there's no
   feedback while you hold and you can't tell how long is long enough. Make it act
