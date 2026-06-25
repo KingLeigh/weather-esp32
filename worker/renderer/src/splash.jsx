@@ -33,7 +33,8 @@ const NUM_WIDTH = 38;
 const LIST_WIDTH = 800;
 const SPLASH_STEPS = [
   'Ensure your device is charged.',
-  'Long press the white button to enter setup mode.',
+  'Long press the white button to open the Menu.',
+  'Long press the white button to select Device setup.',
 ];
 
 // Decorative weather-icon strip for the splash. Codepoints are raw Erik

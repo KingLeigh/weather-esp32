@@ -7,17 +7,11 @@
 // values to NVS via saveConfig() and calls esp_restart().
 //
 // Returns on idle timeout (no activity for IDLE_TIMEOUT_MS) OR when the user
-// long-presses the button to open the on-device menu. On a successful save the
-// chip restarts and never returns from this function. The caller renders the
-// setup screen before calling (renderSetupScreen, with the WiFi-join QR).
+// presses the button (any press) to exit. Either way the caller then performs the
+// Home transition (weather / splash). On a successful save the chip restarts and
+// never returns from this function. The caller renders the setup screen before
+// calling (renderSetupScreen, with the WiFi-join QR).
 
 #pragma once
 
-// Why enterSetupMode() returned (it never returns on a successful save — the
-// chip restarts instead).
-enum SetupResult {
-    SETUP_TIMEOUT,  // idle timeout / user gave up — caller goes home
-    SETUP_MENU,     // user long-pressed → open the on-device menu
-};
-
-SetupResult enterSetupMode();
+void enterSetupMode();

@@ -35,9 +35,34 @@ Remaining:
   the instant the hold crosses `BUTTON_HOLD_MS`, then swallow the still-held
   button via a shared "waiting-for-release" gate so it isn't re-read — and can't
   bleed into the factory-reset confirm and auto-confirm it. Two spots:
-  `readButtonEvent()` (returns `BTN_LONG` only after release) and `enterMenuMode()`
-  (its opening `while (digitalRead == LOW)` defers `renderMenu` until release).
+  `readButtonEvent()` (returns `BTN_LONG` only after release) and the shared
+  `waitForButtonRelease()` gate run before the first screen opens.
   Consider also dropping `BUTTON_HOLD_MS` (1500 ms) once there's instant feedback.
+
+### Screen state-machine refactor — ✅ Shipped (v9)
+The on-device UI is now a small, declarative state machine. Each interactive
+screen is a `Screen` (a render fn + `onShort`/`onLong`/`onIdle` handlers that
+return a navigation result), driven by one shared poll loop (`runScreen`) and one
+navigator (`runUi`) — replacing five hand-rolled button loops. Adding a screen is
+now "fill in a struct and route to it," not "copy a loop."
+
+UX is unified to match:
+- **Long-press from any home screen opens the Menu** (the single hub) — weather,
+  onboarding splash, and no-WiFi splash all behave the same. Device setup is
+  reached via **Menu → Device setup** (the old splash → setup-direct path is gone).
+- **Every sub-screen exits Home, never back to the Menu** — Device setup, Factory
+  reset, Debug, Recent Errors. Re-entering the menu is a deliberate long-press.
+- **Short and long press both act on every interactive screen** (Device setup's
+  short press now exits, matching long press); one 30 s idle timeout for all awake
+  screens (Device setup keeps its longer 3-min timeout).
+- Returning to weather **keeps the previous screen on the panel** until the fresh
+  weather is ready (a brief "blank while loading" interstitial was tried and
+  removed — it read as a dead device).
+
+Screen polish along the way: the Debug live test is titled **Device info** (the
+WiFi line drops the dBm reading), the Factory reset screen gained a title +
+divider to match, and the onboarding splash text was rewritten for the
+Menu → Device setup flow.
 
 ### Status codes below the weather — ✅ Shipped (v5)
 Replaced the single staleness *time* badge ("33m") and the always-on battery icon
