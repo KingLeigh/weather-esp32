@@ -835,7 +835,7 @@ function ForecastChart({ data, hasRain, hasSnow }) {
                 top: -SUN_STRIP_H,
                 width: SUN_LABEL_W,
                 height: SUN_STRIP_H,
-                fontSize: 18,
+                fontSize: 20,
                 fontWeight: 700,
                 color: FG,
                 display: 'flex',
