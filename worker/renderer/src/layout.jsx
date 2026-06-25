@@ -116,6 +116,7 @@ function SunIcon({ size, label }) {
       <svg
         width={size}
         height={size}
+        viewBox={`0 0 ${size} ${size}`}
         style={{ position: 'absolute', left: 0, top: 0 }}
       >
         <circle
@@ -659,7 +660,14 @@ function ForecastChart({ data, hasRain, hasSnow }) {
           height: chartH,
         }}
       >
-        <svg width={chartW} height={chartH} style={{ position: 'absolute', left: 0, top: 0 }}>
+        {/* viewBox is REQUIRED: Satori embeds this nested <svg> as an
+            <image> data-URI. Without a viewBox it emits width="Infinity"
+            height="NaN", leaving resvg to guess the coordinate system when
+            scaling into the 880px box — local resvg fills the box (1:1) but
+            the Cloudflare-edge resvg renders the content ~2.4% narrow,
+            drifting the gridlines/line away from the outer-positioned labels.
+            An explicit viewBox makes the mapping deterministic everywhere. */}
+        <svg width={chartW} height={chartH} viewBox={`0 0 ${chartW} ${chartH}`} style={{ position: 'absolute', left: 0, top: 0 }}>
           {chartGridlines(chartW, chartH, updated, n, inset, inset + usableH)}
           {/* Horizontal reference lines at each temp step */}
           {(() => {
