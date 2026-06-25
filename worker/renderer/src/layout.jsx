@@ -820,12 +820,12 @@ function ForecastChart({ data, hasRain, hasSnow }) {
         {sunMarks.map(({ key, x, label }) => {
           const isSunset = key === 'sunset';
           const boxLeft = isSunset ? x - SUN_LABEL_PAD - SUN_LABEL_W : x + SUN_LABEL_PAD;
-          // Drop a label that would overrun a chart edge — the ribbon edge still
-          // marks the transition. A sunset's label sits left of its marker, so it
-          // disappears once sunset is within ~1h40m of "now" (markerX < label
-          // width); a sunrise's sits right of its marker and only drops out deep
-          // into the next day, near the right edge.
-          if (boxLeft < 0 || boxLeft + SUN_LABEL_W > chartW) return null;
+          // Only drop a label that would overrun the RIGHT edge — that's the
+          // sunrise label when sunrise is ~a full day out (far-off, low-value
+          // data). A left-overrunning sunset label is intentionally NOT hidden:
+          // the imminent sunset time is worth keeping even when it spills past
+          // the left edge. (Left-edge handling is left to revisit later.)
+          if (boxLeft + SUN_LABEL_W > chartW) return null;
           return (
             <div
               key={`sun-lbl-${key}`}
