@@ -25,9 +25,16 @@ import { rgbaToGrayscalePng } from './png-encode.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
-const SAMPLE = join(ROOT, 'weather-sample.json');
-const PNG_OUTPUT = join(ROOT, 'preview.png');
-const SVG_OUTPUT = join(ROOT, 'preview.svg');
+// Optional sample arg: `tsx src/preview.js weather-sample-night.json` renders
+// that fixture to preview-<variant>.png/.svg. With no arg, the default sample
+// renders to preview.png/.svg.
+const sampleArg = process.argv[2] || 'weather-sample.json';
+const variant = /^weather-sample(-[a-z0-9-]+)?\.json$/i.exec(sampleArg);
+const suffix = variant && variant[1] ? variant[1] : '';
+
+const SAMPLE = join(ROOT, sampleArg);
+const PNG_OUTPUT = join(ROOT, `preview${suffix}.png`);
+const SVG_OUTPUT = join(ROOT, `preview${suffix}.svg`);
 
 // ─── main ─────────────────────────────────────────────────────────────────────
 

@@ -1,0 +1,13 @@
+{
+  "temperature": { "current": 77, "high": 82, "low": 62 },
+  "weather": "cloudy",
+  "rain_chance": [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  "snow_chance": [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  "hourly_temp": [77,74,72,69,67,65,64,64,68,72,76,79,81,82,82,81,81,80,79,78,77,77,78,78],
+  "uv": { "current": 0, "high": 9 },
+  "sun": { "sunrise": "05:25 AM", "sunset": "08:31 PM", "sunrise_min": 325, "sunset_min": 1231 },
+  "moon": { "illumination": 50, "phase": "Full Moon" },
+  "is_day": false,
+  "updated": "2026-06-23T22:00:00",
+  "rain_in": 0.0, "snow_in": 0.0
+}

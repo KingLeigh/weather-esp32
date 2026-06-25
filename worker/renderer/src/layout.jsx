@@ -374,6 +374,22 @@ const PRECIP_THRESHOLD = 5;
 // Width of each hour-axis label tile, centered on its tick.
 const AXIS_LABEL_W = 50;
 
+// ─── night ribbon / sun markers ─────────────────────────────────────────────
+// The strip directly above the chart doubles as a "night ribbon": a solid bar
+// spanning the hours the sun is down. It can wrap into two segments (one at
+// each edge of the window) when "now" itself falls at night. The sunrise/sunset
+// time labels sit in the DAY portion of that same strip, just outside their
+// marker, so the strip costs no height beyond the old floating labels.
+const SUN_STRIP_H = 22;     // strip the sun time-labels occupy above the chart
+const RIBBON_H = 10;        // night-ribbon thickness
+const NIGHT_FILL = '#999';  // solid night fill — a soft grey wash, lighter than the temp line
+// Vertical placement of the ribbon: true = flush with the chart's top edge
+// (its bottom sits on y=0); false = centered in the label strip, floating just
+// above the chart (aligned with the time labels). Flip to compare.
+const RIBBON_FLUSH = false;
+const SUN_LABEL_W = 58;     // width of a sun time-label tile
+const SUN_LABEL_PAD = 6;    // gap between a marker and its label
+
 // ─── shared axis labels (used by both chart types) ──────────────────────────
 
 function AxisLabels({ chartW, updated, n }) {
@@ -419,10 +435,6 @@ function AxisLabels({ chartW, updated, n }) {
 
 const GRIDLINE_MAJOR = '#888';  // midnight, noon — one shade darker
 const GRIDLINE_MINOR = '#999';  // every other 3-hour mark + horizontals
-
-// Sunrise/sunset markers: dotted vertical lines, solid black so they stay
-// distinct from the grey hour gridlines and render cleanly on the 4bpp panel.
-const SUN_MARK_DASH = '2 6';
 
 function chartGridlines(chartW, chartH, updated, n, yTop, yBottom) {
   // yTop / yBottom define the drawable region within the chart; gridlines
@@ -619,6 +631,25 @@ function ForecastChart({ data, hasRain, hasSnow }) {
       return { key: m.key, x: (offset / (n - 1)) * chartW, label: formatClockLabel(m.min) };
     });
 
+  // Night-ribbon segments. The sun is down *before* a sunrise and *after* a
+  // sunset, so each gap's day/night state is fixed by the marker that bounds it
+  // — no is_day flag needed, and the window's night wraps to two segments (one
+  // at each edge) automatically when "now" falls at night. x is clamped to the
+  // chart so a marker just past the right edge still closes its segment.
+  const sortedSun = sunMarks
+    .map((m) => ({ ...m, x: Math.max(0, Math.min(chartW, m.x)) }))
+    .sort((a, b) => a.x - b.x);
+  const nightSegments = [];
+  let segStart = 0;
+  for (const mark of sortedSun) {
+    if (mark.key === 'sunrise' && mark.x > segStart) nightSegments.push([segStart, mark.x]);
+    segStart = mark.x;
+  }
+  const lastSun = sortedSun[sortedSun.length - 1];
+  if (lastSun && lastSun.key === 'sunset' && chartW > lastSun.x) {
+    nightSegments.push([lastSun.x, chartW]);
+  }
+
   return (
     <div
       style={{
@@ -717,19 +748,6 @@ function ForecastChart({ data, hasRain, hasSnow }) {
               />
             )
           ))}
-          {/* Sunrise/sunset dotted markers (behind the temp line) */}
-          {sunMarks.map(({ key, x }) => (
-            <line
-              key={`sun-${key}`}
-              x1={x}
-              y1={inset}
-              x2={x}
-              y2={inset + usableH}
-              stroke={FG}
-              strokeWidth={2}
-              strokeDasharray={SUN_MARK_DASH}
-            />
-          ))}
           {/* Temperature line (on top of everything) */}
           <polyline
             points={lineStr}
@@ -750,6 +768,22 @@ function ForecastChart({ data, hasRain, hasSnow }) {
             shapeRendering="crispEdges"
           />
         </svg>
+        {/* Night ribbon: solid bar(s) in the strip above the chart marking the
+            hours the sun is down, flush with the chart's top edge. The dotted
+            markers drop from its edges; the time labels sit in the day gaps. */}
+        {nightSegments.map(([x0, x1], i) => (
+          <div
+            key={`night-${i}`}
+            style={{
+              position: 'absolute',
+              left: x0,
+              top: RIBBON_FLUSH ? -RIBBON_H : -(SUN_STRIP_H + RIBBON_H) / 2,
+              width: x1 - x0,
+              height: RIBBON_H,
+              backgroundColor: NIGHT_FILL,
+            }}
+          />
+        ))}
         {/* Temperature labels at each 3-hour gridline. Each sits on the
             curve's vertex for that hour (shared x-mapping), placed above or
             below the line per the midY rule so it never clips an edge. A label
@@ -780,25 +814,32 @@ function ForecastChart({ data, hasRain, hasSnow }) {
             </div>
           );
         })}
-        {/* Sunrise/sunset time labels, in the gap above their marker lines. */}
-        {sunMarks.map(({ key, x, label }) => (
-          <div
-            key={`sun-lbl-${key}`}
-            style={{
-              position: 'absolute',
-              left: x - 40,
-              top: -26,
-              width: 80,
-              fontSize: 18,
-              fontWeight: 700,
-              color: FG,
-              display: 'flex',
-              justifyContent: 'center',
-            }}
-          >
-            {label}
-          </div>
-        ))}
+        {/* Sunrise/sunset time labels — placed in the DAY portion of the strip,
+            just outside the marker (before a sunset, after a sunrise) so they
+            never sit on top of the night ribbon, vertically centered to it. */}
+        {sunMarks.map(({ key, x, label }) => {
+          const isSunset = key === 'sunset';
+          return (
+            <div
+              key={`sun-lbl-${key}`}
+              style={{
+                position: 'absolute',
+                left: isSunset ? x - SUN_LABEL_PAD - SUN_LABEL_W : x + SUN_LABEL_PAD,
+                top: -SUN_STRIP_H,
+                width: SUN_LABEL_W,
+                height: SUN_STRIP_H,
+                fontSize: 18,
+                fontWeight: 700,
+                color: FG,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: isSunset ? 'flex-end' : 'flex-start',
+              }}
+            >
+              {label}
+            </div>
+          );
+        })}
       </div>
 
       <AxisLabels chartW={chartW} updated={updated} n={n} />
