@@ -819,12 +819,19 @@ function ForecastChart({ data, hasRain, hasSnow }) {
             never sit on top of the night ribbon, vertically centered to it. */}
         {sunMarks.map(({ key, x, label }) => {
           const isSunset = key === 'sunset';
+          const boxLeft = isSunset ? x - SUN_LABEL_PAD - SUN_LABEL_W : x + SUN_LABEL_PAD;
+          // Drop a label that would overrun a chart edge — the ribbon edge still
+          // marks the transition. A sunset's label sits left of its marker, so it
+          // disappears once sunset is within ~1h40m of "now" (markerX < label
+          // width); a sunrise's sits right of its marker and only drops out deep
+          // into the next day, near the right edge.
+          if (boxLeft < 0 || boxLeft + SUN_LABEL_W > chartW) return null;
           return (
             <div
               key={`sun-lbl-${key}`}
               style={{
                 position: 'absolute',
-                left: isSunset ? x - SUN_LABEL_PAD - SUN_LABEL_W : x + SUN_LABEL_PAD,
+                left: boxLeft,
                 top: -SUN_STRIP_H,
                 width: SUN_LABEL_W,
                 height: SUN_STRIP_H,
