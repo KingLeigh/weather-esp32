@@ -382,7 +382,10 @@ const AXIS_LABEL_W = 50;
 // marker, so the strip costs no height beyond the old floating labels.
 const SUN_STRIP_H = 22;     // strip the sun time-labels occupy above the chart
 const RIBBON_H = 10;        // night-ribbon thickness
-const NIGHT_FILL = '#999';  // solid night fill — a soft grey wash, lighter than the temp line
+const NIGHT_FILL = '#bbb';  // solid night fill — kept light/muted so it doesn't pull focus; a
+                            // solid fill reads heavier on the 4bpp panel than the same grey
+                            // would as a thin gridline
+const SUN_LABEL_COLOR = '#555'; // muted grey for the sunrise/sunset time labels (was pure black)
 // Vertical placement of the ribbon: true = flush with the chart's top edge
 // (its bottom sits on y=0); false = centered in the label strip, floating just
 // above the chart (aligned with the time labels). Flip to compare.
@@ -433,7 +436,8 @@ function AxisLabels({ chartW, updated, n }) {
 
 // ─── shared chart gridlines (vertical lines at 3-hour boundaries) ───────────
 
-const GRIDLINE_MAJOR = '#888';  // midnight, noon — one shade darker
+const GRIDLINE_MAJOR = '#777';  // midnight, noon — darker than the rest so the day boundaries
+                                // are easy to find at a glance (orient "how far out" is that rain)
 const GRIDLINE_MINOR = '#999';  // every other 3-hour mark + horizontals
 
 function chartGridlines(chartW, chartH, updated, n, yTop, yBottom) {
@@ -453,7 +457,7 @@ function chartGridlines(chartW, chartH, updated, n, yTop, yBottom) {
       x2={x}
       y2={y2}
       stroke={isMajor ? GRIDLINE_MAJOR : GRIDLINE_MINOR}
-      strokeWidth={1}
+      strokeWidth={isMajor ? 2 : 1}
       shapeRendering="crispEdges"
     />
   ));
@@ -837,7 +841,7 @@ function ForecastChart({ data, hasRain, hasSnow }) {
                 height: SUN_STRIP_H,
                 fontSize: 20,
                 fontWeight: 700,
-                color: FG,
+                color: SUN_LABEL_COLOR,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: isSunset ? 'flex-end' : 'flex-start',
