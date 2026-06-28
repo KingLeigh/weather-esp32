@@ -495,14 +495,20 @@ function ForecastChart({ data, hasRain, hasSnow }) {
   const lineStr = points.map(([x, y]) => `${x},${y}`).join(' ');
 
   // ── Precipitation bars (rendered underneath temp line) ─────────────
-  const barW = chartW / n;
+  // Bars share the temperature line's slot mapping (chartW/(n-1)) and are
+  // CENTERED on each hour's vertex, so they register with the curve, gridlines,
+  // and hour labels. (Previously they used chartW/n, left-aligned, which drifted
+  // out of register toward the right edge.) The first/last bars are half-width,
+  // clipped at the chart edges.
+  const barSlotW = n > 1 ? chartW / (n - 1) : chartW;
+  const barX = (i) => i * barSlotW - barSlotW / 2;
   const rainBars = hasRain ? rain_chance.map((pct, i) => {
     const barH = (pct / 100) * usableH;
-    return { x: i * barW, y: inset + usableH - barH, w: barW, h: barH };
+    return { x: barX(i), y: inset + usableH - barH, w: barSlotW, h: barH };
   }) : [];
   const snowBars = hasSnow ? snow_chance.map((pct, i) => {
     const barH = (pct / 100) * usableH;
-    return { x: i * barW, y: inset + usableH - barH, w: barW, h: barH };
+    return { x: barX(i), y: inset + usableH - barH, w: barSlotW, h: barH };
   }) : [];
 
   // ── Temperature label placement ────────────────────────────────────
