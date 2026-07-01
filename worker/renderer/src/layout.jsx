@@ -21,6 +21,7 @@
 // wrangler's esbuild classic JSX transform needs it explicitly in scope.
 // eslint-disable-next-line no-unused-vars
 import React from 'react';
+import { selectStatus, parseLocalHour, PRECIP_THRESHOLD } from './status.js';
 
 // ─── shared layout constants ─────────────────────────────────────────────────
 
@@ -317,14 +318,6 @@ function Hero({ data }) {
   );
 }
 
-// Extract the hour from an ISO-ish timestamp like "2026-04-11T14:30:00".
-// Minutes are ignored — the chart aligns to hourly buckets matching the data
-// granularity, so axis labels and gridlines land on exact bar edges.
-function parseLocalHour(updated) {
-  const m = /T(\d{2})/.exec(updated ?? '');
-  return m ? parseInt(m[1], 10) : 0;
-}
-
 // Compute chart x positions and labels for every 3-hour clock boundary
 // (00, 03, 06, 09, 12, 15, 18, 21) in the window starting at nowHour.
 //
@@ -357,9 +350,6 @@ function computeAxisLabels(nowHour, chartW, n) {
   }
   return out;
 }
-
-// Threshold: show precip chart if any hour has >= this % chance.
-const PRECIP_THRESHOLD = 5;
 
 // Width of each hour-axis label tile, centered on its tick.
 const AXIS_LABEL_W = 50;
@@ -489,112 +479,12 @@ function ForecastChart({ data, hasRain, hasSnow }) {
   // top and bottom edges regardless of where the curve sits.
   const midY = inset + usableH / 2;
 
-  // ── Title + summary ───────────────────────────────────────────────
-  const hasPrecip = hasRain || hasSnow;
-
-  // Precipitation summary — confidence-aware, with natural time periods.
-  //
-  // Confidence tiers based on peak probability:
-  //   < 20%  → no text (chart bars still visible if above PRECIP_THRESHOLD)
-  //   5-30%  → "Chance of {type} {period}"
-  //   30-60% → "{Type} likely {period}"
-  //   > 60%  → "{Type} {period}" / "{Type-ing} now"
-  //
-  // Time periods (based on clock hour of first significant probability):
-  //   Hour 0           → "now"
-  //   4am-12pm         → "this morning"
-  //   12pm-5pm         → "this afternoon"
-  //   5pm-9pm          → "this evening"
-  //   9pm-12am         → "tonight"
-  //   12am-4am         → "overnight"
-  //   4am+ next day    → "tomorrow"
-  //
-  // Daily total appended as "· X.X" today" only when confidence > 30%
-  // AND total > 0 AND period is not "tomorrow" (different calendar day).
-
+  // ── Title status ──────────────────────────────────────────────────
+  // The title shows the single highest-priority status from the providers in
+  // status.js (empty when none applies). nowH (the local hour of "now") is
+  // also used below to position the temperature labels.
   const nowH = parseLocalHour(updated);
-
-  // Map an hour offset (0-23) to a named time period.
-  const periodForOffset = (offset) => {
-    if (offset === 0) return 'now';
-    const clockH = (nowH + offset) % 24;
-    const isNextDay = nowH + offset >= 24;
-    if (isNextDay && clockH >= 4) return 'tomorrow';
-    if (clockH >= 4 && clockH < 12) return 'this morning';
-    if (clockH >= 12 && clockH < 17) return 'this afternoon';
-    if (clockH >= 17 && clockH < 21) return 'this evening';
-    if (clockH >= 21) return 'tonight';
-    return 'overnight'; // 0-4
-  };
-
-  // Confidence thresholds aligned with NWS (National Weather Service)
-  // standard probability-to-language mappings:
-  //   < 20%   — not mentioned in text (bars still render on chart)
-  //   20-50%  — "Chance of rain"
-  //   60-70%  — "Rain likely"
-  //   80%+    — "Rain" / "Raining"
-  // Ref: https://www.weather.gov/media/pah/WeatherEducation/pop.pdf
-  //      https://forecast.weather.gov/glossary.php?word=slight+chance
-  const TEXT_THRESHOLD = 20;
-
-  const describeSingleType = (chances, typeNoun, typeVerb) => {
-    const typeCap = typeNoun[0].toUpperCase() + typeNoun.slice(1);
-    const peak = Math.max(...chances);
-    if (peak < PRECIP_THRESHOLD) return null; // no bars on chart either
-
-    // Find first hour above TEXT_THRESHOLD for the time description.
-    const firstSignificant = chances.findIndex((p) => p >= TEXT_THRESHOLD);
-    if (firstSignificant === -1) return null; // bars show but too low for text
-
-    const period = periodForOffset(firstSignificant);
-    const isTomorrow = period === 'tomorrow';
-
-    let desc;
-    if (peak <= 50) {
-      desc = `Chance of ${typeNoun} ${period}`;
-    } else if (peak <= 70) {
-      desc = period === 'now' ? `${typeCap} likely now` : `${typeCap} likely ${period}`;
-    } else {
-      // 80%+ — high confidence, use present tense for "now"
-      desc = period === 'now' ? `${typeVerb} now` : `${typeCap} ${period}`;
-    }
-
-    return { desc, isTomorrow, peak, firstHour: firstSignificant };
-  };
-
-  // Pick the most relevant precipitation type to describe in text.
-  // When both rain and snow are present, describe whichever comes first
-  // (i.e., is most imminent). If the earlier one doesn't meet the text
-  // threshold, fall through to the later one. The chart handles the
-  // visual representation of both types.
-  let rightSummary = '';
-  if (!hasPrecip) {
-    rightSummary = '';
-  } else {
-    const rainResult = hasRain ? describeSingleType(rain_chance, 'rain', 'Raining') : null;
-    const snowResult = hasSnow ? describeSingleType(snow_chance, 'snow', 'Snowing') : null;
-
-    // Pick the earliest, or whichever is non-null.
-    let result, amount;
-    if (rainResult && snowResult) {
-      if (rainResult.firstHour <= snowResult.firstHour) {
-        result = rainResult; amount = data.rain_in;
-      } else {
-        result = snowResult; amount = data.snow_in;
-      }
-    } else if (rainResult) {
-      result = rainResult; amount = data.rain_in;
-    } else {
-      result = snowResult; amount = data.snow_in;
-    }
-
-    if (!result) {
-      rightSummary = '';
-    } else {
-      const showTotal = result.peak > 50 && amount > 0 && !result.isTomorrow;
-      rightSummary = showTotal ? `${result.desc} · ${String(amount)}" today` : result.desc;
-    }
-  }
+  const statusText = selectStatus(data)?.text ?? '';
 
   return (
     <div
@@ -625,7 +515,7 @@ function ForecastChart({ data, hasRain, hasSnow }) {
             whiteSpace: 'nowrap',
           }}
         >
-          {rightSummary}
+          {statusText}
         </div>
       </div>
 
