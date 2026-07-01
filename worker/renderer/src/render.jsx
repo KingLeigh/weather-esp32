@@ -24,11 +24,13 @@ const WEATHER_ICONS_TTF = join(
   'font',
   'weathericons-regular-webfont.ttf',
 );
+const MESSAGES_CSV = join(__dirname, '..', 'messages.csv');
 
 const WIDTH = 960;
 const HEIGHT = 540;
 
 let cachedFonts = null;
+let cachedMessages = null;
 
 async function loadFonts() {
   if (cachedFonts) return cachedFonts;
@@ -45,6 +47,15 @@ async function loadFonts() {
   return cachedFonts;
 }
 
+// Load the bundled status-message CSV (see status.js / messageStatus). A missing
+// or unreadable file becomes an empty string (no message rows).
+async function loadMessages() {
+  if (cachedMessages == null) {
+    cachedMessages = await readFile(MESSAGES_CSV, 'utf-8').catch(() => '');
+  }
+  return cachedMessages;
+}
+
 /**
  * Render a weather frame to raw RGBA pixels and the intermediate SVG.
  * Used by preview.js (which converts to grayscale PNG and writes the SVG for
@@ -54,10 +65,12 @@ async function loadFonts() {
  * @param {object} data - Normalized WeatherData (matches the Worker JSON shape).
  * @returns {Promise<{svg: string, width: number, height: number, pixels: Uint8Array}>}
  */
-export async function renderSvg(data) {
+export async function renderSvg(data, options = {}) {
   const fonts = await loadFonts();
+  const messages = await loadMessages();
+  const context = { location: options.location, messages };
 
-  const svg = await satori(<WeatherFrame data={data} />, {
+  const svg = await satori(<WeatherFrame data={data} context={context} />, {
     width: WIDTH,
     height: HEIGHT,
     fonts,

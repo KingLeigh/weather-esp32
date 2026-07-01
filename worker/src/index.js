@@ -160,8 +160,11 @@ export default {
       try {
         const weatherData = await fetchWeatherData(env, `${loc.lat},${loc.lon}`);
 
-        // Hash weather data (excluding timestamp) to detect changes.
-        const dataForHash = { ...weatherData, updated: undefined };
+        // Hash weather data to detect changes. Keep the DATE (not the minute)
+        // of `updated` so a re-render fires when the local day rolls over —
+        // date-specific statuses (e.g. the message CSV) depend on it — while
+        // minute-level timestamp changes still don't force a re-render.
+        const dataForHash = { ...weatherData, updated: (weatherData.updated || '').slice(0, 10) };
         const newHash = simpleHash(JSON.stringify(dataForHash));
         const prevHash = await env.WEATHER_KV.get(`render_hash:${loc.zip}`);
 
@@ -175,7 +178,7 @@ export default {
         }
 
         console.log(`[${loc.zip}] changed, rendering PNG...`);
-        const png = await renderWeatherPng(weatherData);
+        const png = await renderWeatherPng(weatherData, { location: loc.zip });
         await Promise.all([
           env.WEATHER_KV.put(`render_png:${loc.zip}`, png, { expirationTtl: KV_TTL }),
           env.WEATHER_KV.put(`render_updated:${loc.zip}`, weatherData.updated, { expirationTtl: KV_TTL }),
@@ -291,7 +294,7 @@ async function serveWeatherPng(env, loc) {
 
     // Cache miss — render on demand.
     const weatherData = await fetchWeatherData(env, `${loc.lat},${loc.lon}`);
-    const png = await renderWeatherPng(weatherData);
+    const png = await renderWeatherPng(weatherData, { location: loc.zip });
     await Promise.all([
       env.WEATHER_KV.put(`render_png:${loc.zip}`, png, { expirationTtl: KV_TTL }),
       env.WEATHER_KV.put(`render_updated:${loc.zip}`, weatherData.updated, { expirationTtl: KV_TTL }),

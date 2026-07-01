@@ -41,7 +41,9 @@ const SVG_OUTPUT = join(ROOT, `preview${suffix}.svg`);
 const data = JSON.parse(await readFile(SAMPLE, 'utf-8'));
 
 const started = Date.now();
-const { svg, width, height, pixels } = await renderSvg(data);
+// Location for the message-status provider (see status.js). Real renders get
+// the zip from the Worker; previews use a fixed one so '*'/zip rows can match.
+const { svg, width, height, pixels } = await renderSvg(data, { location: '10010' });
 const png = rgbaToGrayscalePng(width, height, pixels);
 const elapsed = Date.now() - started;
 

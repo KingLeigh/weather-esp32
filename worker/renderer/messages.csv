@@ -1,0 +1,7 @@
+# Free-text status messages shown on the weather PNG (highest priority).
+# Format: DATE,location,message   — DATE is YYYY-MM-DD (the location's local
+# date), location is a zip or * for all locations, message is free text (commas
+# in the message are fine). Lines whose date isn't today are ignored, so past
+# rows and this comment are harmless. A zip-specific row beats a * row.
+2026-07-04,*,Happy 4th of July!
+2026-12-25,10010,Merry Christmas NYC

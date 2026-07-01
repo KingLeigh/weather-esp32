@@ -26,7 +26,7 @@ export const PRECIP_THRESHOLD = 5;
 // The chart has room for exactly one status; when several apply, the one whose
 // key sits earliest in this list wins. Re-rank by reordering; add a status by
 // inserting its key. (Moon and other statuses will slot in here later.)
-const PRIORITY = ['precip_today', 'full_moon', 'precip_tomorrow'];
+const PRIORITY = ['message', 'precip_today', 'full_moon', 'precip_tomorrow'];
 
 // ── providers: (data) => { key, text } | null ───────────────────────────────
 
@@ -120,18 +120,46 @@ function moonStatus(data) {
     : null;
 }
 
+// Operator message from the bundled messages.csv (DATE,location,message). Fires
+// when the location's current date (from data.updated) matches a row whose
+// location is this zip or '*' (all locations); a zip-specific row beats a '*'
+// one for the same date. The message text is everything after the second comma,
+// so commas within it are preserved. Highest priority — overrides the weather.
+function messageStatus(data, context) {
+  const { location, messages } = context || {};
+  if (!messages) return null;
+  const today = (data.updated || '').slice(0, 10); // YYYY-MM-DD, location-local
+  if (!today) return null;
+
+  let wildcard = null;
+  for (const line of messages.split('\n')) {
+    const parts = line.split(',');
+    if (parts.length < 3) continue; // comment / blank / malformed
+    const date = parts[0].trim();
+    if (date !== today) continue;
+    const loc = parts[1].trim();
+    const text = parts.slice(2).join(',').trim();
+    if (!text) continue;
+    if (loc === location) return { key: 'message', text }; // exact zip wins
+    if (loc === '*' && !wildcard) wildcard = { key: 'message', text };
+  }
+  return wildcard;
+}
+
 // ── registry + selection ─────────────────────────────────────────────────────
 
-const PROVIDERS = [precipStatus, moonStatus];
+const PROVIDERS = [precipStatus, moonStatus, messageStatus];
 
 // Return the highest-priority applicable status ({ key, text }), or null.
-export function selectStatus(data) {
+// `context` carries render-time info some providers need (e.g. { location,
+// messages } for messageStatus); providers that don't need it ignore it.
+export function selectStatus(data, context = {}) {
   const rank = (c) => {
     const i = PRIORITY.indexOf(c.key);
     return i === -1 ? Infinity : i; // unknown keys sort last
   };
   return (
-    PROVIDERS.map((fn) => fn(data))
+    PROVIDERS.map((fn) => fn(data, context))
       .filter(Boolean)
       .sort((a, b) => rank(a) - rank(b))[0] ?? null
   );

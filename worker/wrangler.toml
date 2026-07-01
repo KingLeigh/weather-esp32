@@ -19,6 +19,12 @@ type = "CompiledWasm"
 globs = ["**/*.wasm"]
 fallthrough = true
 
+# "Text" imports return the file contents as a string (renderer/messages.csv).
+[[rules]]
+type = "Text"
+globs = ["**/*.csv"]
+fallthrough = true
+
 # KV namespace for caching weather data
 [[kv_namespaces]]
 binding = "WEATHER_KV"

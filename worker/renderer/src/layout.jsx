@@ -426,7 +426,7 @@ function chartGridlines(chartW, chartH, updated, n, yTop, yBottom) {
 
 // ─── forecast chart (temperature line + optional precip bars) ───────────────
 
-function ForecastChart({ data, hasRain, hasSnow }) {
+function ForecastChart({ data, hasRain, hasSnow, context }) {
   const { hourly_temp, rain_chance, snow_chance, updated } = data;
   const chartW = CONTENT_W;
   const chartH = 164;
@@ -484,7 +484,7 @@ function ForecastChart({ data, hasRain, hasSnow }) {
   // status.js (empty when none applies). nowH (the local hour of "now") is
   // also used below to position the temperature labels.
   const nowH = parseLocalHour(updated);
-  const statusText = selectStatus(data)?.text ?? '';
+  const statusText = selectStatus(data, context)?.text ?? '';
 
   return (
     <div
@@ -673,7 +673,7 @@ function Footer({ data }) {
   );
 }
 
-export function WeatherFrame({ data }) {
+export function WeatherFrame({ data, context }) {
   return (
     <div
       style={{
@@ -691,6 +691,7 @@ export function WeatherFrame({ data }) {
         data={data}
         hasRain={data.rain_chance.some((p) => p >= PRECIP_THRESHOLD)}
         hasSnow={data.snow_chance.some((p) => p >= PRECIP_THRESHOLD)}
+        context={context}
       />
       <Footer data={data} />
     </div>
