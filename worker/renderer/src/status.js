@@ -26,7 +26,7 @@ export const PRECIP_THRESHOLD = 5;
 // The chart has room for exactly one status; when several apply, the one whose
 // key sits earliest in this list wins. Re-rank by reordering; add a status by
 // inserting its key. (Moon and other statuses will slot in here later.)
-const PRIORITY = ['precip_today', 'precip_tomorrow'];
+const PRIORITY = ['precip_today', 'full_moon', 'precip_tomorrow'];
 
 // ── providers: (data) => { key, text } | null ───────────────────────────────
 
@@ -110,9 +110,19 @@ function precipStatus(data) {
   return { key: result.isTomorrow ? 'precip_tomorrow' : 'precip_today', text };
 }
 
+// Full moon. OWM's algorithm snaps daily.moon_phase to exactly 0.5 on the day
+// the full moon occurs (our provider surfaces that as moon.phase === 'Full
+// Moon'), so this fires on the full-moon night itself — not the near-full
+// nights on either side. Ranks above precip_tomorrow but below precip_today.
+function moonStatus(data) {
+  return data.moon?.phase === 'Full Moon'
+    ? { key: 'full_moon', text: 'Full moon tonight' }
+    : null;
+}
+
 // ── registry + selection ─────────────────────────────────────────────────────
 
-const PROVIDERS = [precipStatus];
+const PROVIDERS = [precipStatus, moonStatus];
 
 // Return the highest-priority applicable status ({ key, text }), or null.
 export function selectStatus(data) {
