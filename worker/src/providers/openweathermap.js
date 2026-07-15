@@ -1,5 +1,9 @@
 import { WeatherProvider } from './base.js';
 
+// Minimum `minutely` precipitation (mm/h) to treat a minute as "rain imminent".
+// A small floor so a single trace-drizzle minute doesn't flip an hour to 100%.
+const MINUTELY_PRECIP_MM = 0.1;
+
 /**
  * OpenWeatherMap One Call 3.0 provider implementation
  * API docs: https://openweathermap.org/api/one-call-3
@@ -17,7 +21,10 @@ export class OpenWeatherMapProvider extends WeatherProvider {
     // Location is expected as "lat,lon" string
     const [lat, lon] = this.location.split(',').map(s => s.trim());
 
-    const url = `${this.baseUrl}?lat=${lat}&lon=${lon}&appid=${this.apiKey}&units=imperial&exclude=minutely,alerts`;
+    // Keep `minutely` in the response — it's the 60-minute precip nowcast used
+    // by transform() to catch rain the `hourly` model misses. (The `exclude`
+    // param only trims the payload; it does NOT change the per-call billing.)
+    const url = `${this.baseUrl}?lat=${lat}&lon=${lon}&appid=${this.apiKey}&units=imperial&exclude=alerts`;
 
     const response = await fetch(url);
     if (!response.ok) {
@@ -65,6 +72,37 @@ export class OpenWeatherMapProvider extends WeatherProvider {
 
       hourly_temp.push(Math.round(h.temp));
     }
+
+    // Nowcast override. OWM's `hourly` model can completely miss precip that
+    // its real-time `current` (observed) and `minutely` (next-60-min nowcast)
+    // blocks report — e.g. an active downpour that `hourly` lists as 0% pop.
+    // Fold observed/imminent precip into the hour bucket(s) it lands in and
+    // treat it as certain (100%), so the chart shows rain when it's actually
+    // raining or about to. Bucketing by timestamp means rain that's ~45 min
+    // out lands in the *next* hour, not the current one.
+    //
+    // For now this drives probability only (which the chart maps to bar
+    // height). When bar height moves to precip amount, blend the observed/
+    // nowcast mm into that hour's volume here too.
+    const rainNowcastHours = new Set();
+    const snowNowcastHours = new Set();
+    if ((current.rain?.['1h'] || 0) > 0) rainNowcastHours.add(0);
+    if ((current.snow?.['1h'] || 0) > 0) snowNowcastHours.add(0);
+    if (Array.isArray(data.minutely)) {
+      for (const m of data.minutely) {
+        if ((m.precipitation || 0) < MINUTELY_PRECIP_MM) continue;
+        // Find the hour bucket [dt, dt+3600) this minute falls in.
+        for (let i = 0; i < 24 && i < hourly.length; i++) {
+          if (m.dt >= hourly[i].dt && m.dt < hourly[i].dt + 3600) {
+            // `minutely` has no rain/snow split — attribute to rain.
+            rainNowcastHours.add(i);
+            break;
+          }
+        }
+      }
+    }
+    for (const i of rainNowcastHours) rain_chance[i] = 100;
+    for (const i of snowNowcastHours) snow_chance[i] = 100;
 
     // Map weather condition to our icon types
     const weatherIcon = this._mapConditionToIcon(current.weather[0]?.id || 800);
