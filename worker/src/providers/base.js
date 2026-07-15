@@ -28,6 +28,8 @@ export class WeatherProvider {
    *   weather: 'sunny'|'cloudy'|'partly_cloudy'|'rainy'|'snowy'|'thunderstorm'|'fog',
    *   rain_chance: number[24] (0-100 per hour),
    *   snow_chance: number[24] (0-100 per hour),
+   *   hourly_rain_mm: number[24] (mm/h per hour, rain volume),
+   *   hourly_snow_mm: number[24] (mm/h per hour, snow volume),
    *   hourly_temp: number[24] (°F per hour),
    *   rain_in: number, snow_in: number,
    *   uv: { current, high },
