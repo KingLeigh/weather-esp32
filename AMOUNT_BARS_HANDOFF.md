@@ -21,9 +21,13 @@ outlined snow group → `preview-amountbars.png`) and `weather-sample-stress.jso
 (§5 worst case → `preview-stress.png`); the older rain-bearing fixtures gained
 `hourly_rain_mm`/`hourly_snow_mm` arrays. Transform verified against a
 synthetic OWM payload (nowcast max-blend for hour 0 / minutely buckets /
-sub-floor trace / snow passthrough). Remaining before ship: §8 deploy + KV
-cache bust, then eyeball the served PNG (dasharray on the CF-edge resvg) and
-the physical panel.
+sub-floor trace / snow passthrough).
+
+**SHIPPED: deployed to prod 2026-07-15; status-text amount-gate bugfix (see the
+§4 note) + merge to master via PR #9 on 2026-07-27.** Rain bars verified on the
+CF edge with real precip (heights + shades correct on the served PNG). Still
+pending verification: the dotted snow outline on the edge resvg (needs a snow
+forecast) and how the bars/dots look on the physical panel.
 
 Related memory (background + decision history): `rain-representation-work.md` in
 the project memory dir.

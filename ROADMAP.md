@@ -122,11 +122,33 @@ Follow-ups:
 ### Smaller items
 - **Battery life** — consider raising the device poll interval (`SLEEP_MINUTES`,
   currently 10 min) toward 15.
-- **Grainy grey fills** — chart bars (~`#ccc`) may render grainy on the panel;
-  investigate RGB565 round-trip / resvg dithering / EPD waveform, or quantize to
-  4-bpp-aligned values before PNG encoding.
+- **Grainy grey fills** — grey chart bars (now `#ddd`/`#bbb`/`#999` probability
+  shades) may render grainy on the panel; investigate RGB565 round-trip / resvg
+  dithering / EPD waveform, or quantize to 4-bpp-aligned values before PNG
+  encoding.
 
 ## Server (Cloudflare Worker)
+
+### Rain chart representation — ✅ Shipped (PRs #8, #9)
+The hourly chart's precip bars no longer spend their strongest visual channel on
+bare probability. **Bar height = amount** (linear to 7.6 mm/h — the NWS/AMS
+"heavy rain" onset — clamped above, with a 4 px floor so nonzero trace stays
+visible) and **bar shade = probability** in three discrete buckets
+(<40% / 40–75% / >75% → light/mid/dark grey), so "certain but trivial drizzle"
+and "heavy but iffy storm" look different at a glance. Snow keeps the same shade
+buckets and is marked by a **dotted black outline** (replacing the solid dark
+fill). A bar draws only when an hour has probability AND volume, and the
+headline status text applies the same gate (no more "Raining now" on an
+89%-pop / 0 mm hour). A **nowcast override** (PR #8) folds observed (`current`)
+and imminent (`minutely`) precip into the affected hour bucket(s) as certain,
+with real volumes, catching rain the hourly model misses entirely.
+Design and decision history: `AMOUNT_BARS_HANDOFF.md`.
+
+Remaining:
+- **Dotted snow outline is unverified on the deployed edge** (needs a real snow
+  forecast); the bars haven't been eyeballed on the physical panel yet.
+- Tunables if living with it suggests: `RAIN_FULL_MM` (7.6 — drop toward 4–5 for
+  more height range on common rain), the bucket boundaries, `MIN_BAR_PX`.
 
 ### Severe weather alerts
 The OpenWeatherMap `alerts` field is currently excluded. Explore surfacing alerts
