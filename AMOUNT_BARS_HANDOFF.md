@@ -176,6 +176,13 @@ Snow rect `fill="#666"` → `fill={bar.fill}` PLUS `stroke="#000"`,
 > keeps its pop gate unchanged; the per-hour amount condition falls out of
 > `precipBarH` returning 0 for mm ≤ 0 (the floor only applies to nonzero
 > amounts). Nowcast hours pass the amount condition once §6 plumbs their mm.
+>
+> **Bugfix 2026-07-27:** the status TEXT now applies the same per-hour gate.
+> Found live: OWM gave hour 0 "89% pop, 0 mm" → chart drew no bar (correct)
+> but the headline said "Raining now" (status.js keyed off pop alone).
+> `precipStatus()` now zeroes no-volume hours before computing the first
+> significant hour and peak confidence, so headline timing/tense always
+> matches hours that actually draw bars.
 
 ## 5. Former blockers — resolved by the 2026-07-15 design, verify before shipping
 
