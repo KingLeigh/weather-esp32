@@ -47,12 +47,18 @@ export class OpenWeatherMapProvider extends WeatherProvider {
     // will overlay snow on top of rain).
     const rain_chance = [];
     const snow_chance = [];
+    const hourly_rain_mm = [];
+    const hourly_snow_mm = [];
     const hourly_temp = [];
     for (let i = 0; i < 24 && i < hourly.length; i++) {
       const h = hourly[i];
       const pop = Math.round((h.pop || 0) * 100);
+      // NB: rain/snow `1h` volumes are always mm, even under units=imperial
+      // (the units param only affects temp/wind).
       const rainVol = h.rain?.['1h'] || 0;
       const snowVol = h.snow?.['1h'] || 0;
+      hourly_rain_mm.push(Math.round(rainVol * 100) / 100);
+      hourly_snow_mm.push(Math.round(snowVol * 100) / 100);
 
       if (snowVol > 0 && rainVol === 0) {
         rain_chance.push(0);
@@ -81,28 +87,40 @@ export class OpenWeatherMapProvider extends WeatherProvider {
     // raining or about to. Bucketing by timestamp means rain that's ~45 min
     // out lands in the *next* hour, not the current one.
     //
-    // For now this drives probability only (which the chart maps to bar
-    // height). When bar height moves to precip amount, blend the observed/
-    // nowcast mm into that hour's volume here too.
-    const rainNowcastHours = new Set();
-    const snowNowcastHours = new Set();
-    if ((current.rain?.['1h'] || 0) > 0) rainNowcastHours.add(0);
-    if ((current.snow?.['1h'] || 0) > 0) snowNowcastHours.add(0);
+    // Each nowcast hour also gets a real volume (the chart maps amount to bar
+    // height; a certain-but-zero-mm hour would draw no bar at all): hour 0
+    // uses the observed last-hour volume, and minutely buckets accumulate
+    // per-minute intensity (X mm/h for one minute = X/60 mm of volume). The
+    // hour keeps the larger of its forecast and nowcast volumes.
+    const rainNowcastMm = new Map(); // hour index → observed/imminent mm
+    const snowNowcastMm = new Map();
+    if ((current.rain?.['1h'] || 0) > 0) rainNowcastMm.set(0, current.rain['1h']);
+    if ((current.snow?.['1h'] || 0) > 0) snowNowcastMm.set(0, current.snow['1h']);
     if (Array.isArray(data.minutely)) {
+      const minutelyMm = new Map();
       for (const m of data.minutely) {
         if ((m.precipitation || 0) < MINUTELY_PRECIP_MM) continue;
         // Find the hour bucket [dt, dt+3600) this minute falls in.
         for (let i = 0; i < 24 && i < hourly.length; i++) {
           if (m.dt >= hourly[i].dt && m.dt < hourly[i].dt + 3600) {
             // `minutely` has no rain/snow split — attribute to rain.
-            rainNowcastHours.add(i);
+            minutelyMm.set(i, (minutelyMm.get(i) || 0) + m.precipitation / 60);
             break;
           }
         }
       }
+      for (const [i, mm] of minutelyMm) {
+        rainNowcastMm.set(i, Math.max(rainNowcastMm.get(i) || 0, mm));
+      }
     }
-    for (const i of rainNowcastHours) rain_chance[i] = 100;
-    for (const i of snowNowcastHours) snow_chance[i] = 100;
+    for (const [i, mm] of rainNowcastMm) {
+      rain_chance[i] = 100;
+      hourly_rain_mm[i] = Math.max(hourly_rain_mm[i], Math.round(mm * 100) / 100);
+    }
+    for (const [i, mm] of snowNowcastMm) {
+      snow_chance[i] = 100;
+      hourly_snow_mm[i] = Math.max(hourly_snow_mm[i], Math.round(mm * 100) / 100);
+    }
 
     // Map weather condition to our icon types
     const weatherIcon = this._mapConditionToIcon(current.weather[0]?.id || 800);
@@ -138,6 +156,8 @@ export class OpenWeatherMapProvider extends WeatherProvider {
       weather: weatherIcon,
       rain_chance,
       snow_chance,
+      hourly_rain_mm,
+      hourly_snow_mm,
       hourly_temp,
       rain_in: Math.round((daily.rain || 0) / 25.4 * 100) / 100,  // daily total, mm → inches
       snow_in: Math.round((daily.snow || 0) / 25.4 * 100) / 100,

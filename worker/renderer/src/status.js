@@ -35,9 +35,24 @@ const PRIORITY = ['message', 'precip_today', 'full_moon', 'precip_tomorrow'];
 // `precip_tomorrow` based on when it starts. Covers rain and snow; the text
 // carries the type. Returns null when there's nothing worth saying.
 function precipStatus(data) {
-  const { rain_chance, snow_chance, updated } = data;
-  const hasRain = rain_chance.some((p) => p >= PRECIP_THRESHOLD);
-  const hasSnow = snow_chance.some((p) => p >= PRECIP_THRESHOLD);
+  const {
+    rain_chance, snow_chance,
+    hourly_rain_mm = [], hourly_snow_mm = [],
+    updated,
+  } = data;
+
+  // An hour only counts as precip if it has probability AND expected volume —
+  // the same per-hour gate the chart bars use. Without this, an hour like
+  // "89% pop, 0 mm" (OWM announcing near-certain trace rain) would headline
+  // "Raining now" while the chart (correctly) draws no bar. Zeroing the
+  // no-volume hours up front keeps the rest of the logic — first significant
+  // hour, peak confidence — consistent with what the bars show.
+  const gated = (chances, mm) => chances.map((p, i) => ((mm[i] || 0) > 0 ? p : 0));
+  const rainEff = gated(rain_chance, hourly_rain_mm);
+  const snowEff = gated(snow_chance, hourly_snow_mm);
+
+  const hasRain = rainEff.some((p) => p >= PRECIP_THRESHOLD);
+  const hasSnow = snowEff.some((p) => p >= PRECIP_THRESHOLD);
   if (!hasRain && !hasSnow) return null;
 
   const nowH = parseLocalHour(updated);
@@ -87,8 +102,8 @@ function precipStatus(data) {
 
   // When both rain and snow qualify, describe whichever is most imminent; the
   // chart still shows both bar types.
-  const rainResult = hasRain ? describeSingleType(rain_chance, 'rain', 'Raining') : null;
-  const snowResult = hasSnow ? describeSingleType(snow_chance, 'snow', 'Snowing') : null;
+  const rainResult = hasRain ? describeSingleType(rainEff, 'rain', 'Raining') : null;
+  const snowResult = hasSnow ? describeSingleType(snowEff, 'snow', 'Snowing') : null;
 
   let result, amount;
   if (rainResult && snowResult) {

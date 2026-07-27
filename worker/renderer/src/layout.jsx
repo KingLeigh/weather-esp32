@@ -41,6 +41,25 @@ const FG_MUTED = '#333'; // Darker than the old #555 — 4bpp e-paper can't
 const BG = '#fff';
 const BORDER = '#000';
 
+// ─── precip bar scales ───────────────────────────────────────────────────────
+// Bar HEIGHT = precip amount (mm/h), linear up to a fixed ceiling. 7.6 mm/h is
+// the US NWS/AMS "heavy rain" onset (0.30 in/h) — a full bar means officially
+// heavy rain, and anything worse just clamps. MIN_BAR_PX keeps a nonzero trace
+// amount visible instead of a sub-pixel sliver; zero-amount hours draw nothing,
+// so probability-only hours (pop but no volume) don't produce stub bars.
+const RAIN_FULL_MM = 7.6;
+const MIN_BAR_PX = 4;
+const precipBarH = (mm, usableH) => {
+  if (!(mm > 0)) return 0;
+  return Math.max(MIN_BAR_PX, Math.min(1, mm / RAIN_FULL_MM) * usableH);
+};
+
+// Bar SHADE = probability, in 3 discrete buckets — a continuous ramp is false
+// precision on the panel's 16 grey levels. Buckets are ≥2 4bpp steps (0x22)
+// apart so they stay distinguishable despite grainy fills, and the darkest
+// stays light enough that the temp line/labels never need halos.
+const precipShade = (pop) => (pop > 75 ? '#999' : pop >= 40 ? '#bbb' : '#ddd');
+
 // Mapping from the normalized `weather` strings to Erik Flowers Weather
 // Icons codepoints (Private Use Area of the WeatherIcons TTF). Each entry
 // has a `day` and `night` codepoint; most conditions use the same glyph for
@@ -427,7 +446,11 @@ function chartGridlines(chartW, chartH, updated, n, yTop, yBottom) {
 // ─── forecast chart (temperature line + optional precip bars) ───────────────
 
 function ForecastChart({ data, hasRain, hasSnow, context }) {
-  const { hourly_temp, rain_chance, snow_chance, updated } = data;
+  const {
+    hourly_temp, rain_chance, snow_chance,
+    hourly_rain_mm = [], hourly_snow_mm = [],
+    updated,
+  } = data;
   const chartW = CONTENT_W;
   const chartH = 164;
   const n = hourly_temp.length;
@@ -456,20 +479,21 @@ function ForecastChart({ data, hasRain, hasSnow, context }) {
   const lineStr = points.map(([x, y]) => `${x},${y}`).join(' ');
 
   // ── Precipitation bars (rendered underneath temp line) ─────────────
-  // Bars share the temperature line's slot mapping (chartW/(n-1)) and are
-  // CENTERED on each hour's vertex, so they register with the curve, gridlines,
-  // and hour labels. (Previously they used chartW/n, left-aligned, which drifted
-  // out of register toward the right edge.) The first/last bars are half-width,
-  // clipped at the chart edges.
+  // Height = amount (precipBarH), shade = probability (precipShade); an hour
+  // with pop but zero volume draws nothing. Bars share the temperature line's
+  // slot mapping (chartW/(n-1)) and are CENTERED on each hour's vertex, so
+  // they register with the curve, gridlines, and hour labels. (Previously they
+  // used chartW/n, left-aligned, which drifted out of register toward the
+  // right edge.) The first/last bars are half-width, clipped at the chart edges.
   const barSlotW = n > 1 ? chartW / (n - 1) : chartW;
   const barX = (i) => i * barSlotW - barSlotW / 2;
   const rainBars = hasRain ? rain_chance.map((pct, i) => {
-    const barH = (pct / 100) * usableH;
-    return { x: barX(i), y: inset + usableH - barH, w: barSlotW, h: barH };
+    const barH = precipBarH(hourly_rain_mm[i] || 0, usableH);
+    return { x: barX(i), y: inset + usableH - barH, w: barSlotW, h: barH, fill: precipShade(pct) };
   }) : [];
   const snowBars = hasSnow ? snow_chance.map((pct, i) => {
-    const barH = (pct / 100) * usableH;
-    return { x: barX(i), y: inset + usableH - barH, w: barSlotW, h: barH };
+    const barH = precipBarH(hourly_snow_mm[i] || 0, usableH);
+    return { x: barX(i), y: inset + usableH - barH, w: barSlotW, h: barH, fill: precipShade(pct) };
   }) : [];
 
   // ── Temperature label placement ────────────────────────────────────
@@ -556,7 +580,7 @@ function ForecastChart({ data, hasRain, hasSnow, context }) {
             }
             return lines;
           })()}
-          {/* Rain bars (light grey, behind temp line) */}
+          {/* Rain bars (shade = probability bucket, behind temp line) */}
           {rainBars.map((bar, i) => (
             bar.h > 0 && (
               <rect
@@ -565,12 +589,13 @@ function ForecastChart({ data, hasRain, hasSnow, context }) {
                 y={bar.y}
                 width={bar.w}
                 height={bar.h}
-                fill="#ccc"
+                fill={bar.fill}
                 shapeRendering="crispEdges"
               />
             )
           ))}
-          {/* Snow bars (dark grey, behind temp line) */}
+          {/* Snow bars — same probability shades as rain; the black outline is
+              what marks "snow" (replaces the old solid #666 fill) */}
           {snowBars.map((bar, i) => (
             bar.h > 0 && (
               <rect
@@ -579,7 +604,10 @@ function ForecastChart({ data, hasRain, hasSnow, context }) {
                 y={bar.y}
                 width={bar.w}
                 height={bar.h}
-                fill="#666"
+                fill={bar.fill}
+                stroke="#000"
+                strokeWidth={2}
+                strokeDasharray="3 3"
                 shapeRendering="crispEdges"
               />
             )

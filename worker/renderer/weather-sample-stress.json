@@ -1,0 +1,61 @@
+{
+  "_comment": "Legibility worst case (handoff §5 check): every hour 100% pop at 10 mm/h (above RAIN_FULL_MM) → a solid wall of full-height #999 bars. Verifies temp line, temp labels, and gridlines stay readable on the darkest bucket. Render with: npx tsx src/preview.js weather-sample-stress.json",
+  "temperature": {
+    "current": 66,
+    "high": 78,
+    "low": 65
+  },
+  "weather": "rainy",
+  "rain_chance": [
+    100, 100, 100, 100, 100, 100,
+    100, 100, 100, 100, 100, 100,
+    100, 100, 100, 100, 100, 100,
+    100, 100, 100, 100, 100, 100
+  ],
+  "hourly_rain_mm": [
+    10, 10, 10, 10, 10, 10,
+    10, 10, 10, 10, 10, 10,
+    10, 10, 10, 10, 10, 10,
+    10, 10, 10, 10, 10, 10
+  ],
+  "snow_chance": [
+    0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0
+  ],
+  "hourly_snow_mm": [
+    0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0
+  ],
+  "uv": {
+    "current": 1,
+    "high": 3
+  },
+  "sun": {
+    "sunrise": "05:38 AM",
+    "sunset": "08:25 PM",
+    "sunrise_min": 338,
+    "sunset_min": 1225
+  },
+  "moon": {
+    "illumination": 3,
+    "phase": "Waxing Crescent"
+  },
+  "wind": {
+    "mph": 14,
+    "dir": "E"
+  },
+  "is_day": true,
+  "updated": "2026-07-15T08:00:00",
+  "rain_in": 9.45,
+  "snow_in": 0,
+  "hourly_temp": [
+    66, 67, 68, 70, 72, 74,
+    75, 76, 77, 78, 78, 77,
+    76, 75, 74, 72, 70, 69,
+    68, 67, 66, 66, 65, 65
+  ]
+}
