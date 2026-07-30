@@ -448,6 +448,10 @@ function Hero({ data }) {
               alignSelf: 'center',
             }}
           >
+            {/* Dew point row: droplet icon, current dew point */}
+            <HeroStat icon={<DropIcon size={48} color={FG_MUTED} />}>
+              <div style={HERO_STAT_VALUE_STYLE}>{`${data.dew_point}°`}</div>
+            </HeroStat>
             {/* UV row. The sun is drawn at 36px (vs the drop's 48): its rays
                 span 0.96 × size vs the drop's 0.60, so at equal size it
                 towers over the teardrop; 36px puts its core circle at the
@@ -458,10 +462,6 @@ function Hero({ data }) {
               <div style={{ ...HERO_STAT_VALUE_STYLE, fontSize: 40, marginLeft: 12 }}>
                 {String(data.uv.high)}
               </div>
-            </HeroStat>
-            {/* Dew point row: droplet icon, current dew point */}
-            <HeroStat icon={<DropIcon size={48} color={FG_MUTED} />}>
-              <div style={HERO_STAT_VALUE_STYLE}>{`${data.dew_point}°`}</div>
             </HeroStat>
           </div>
         )}
