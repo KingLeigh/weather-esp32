@@ -165,6 +165,11 @@ export class OpenWeatherMapProvider extends WeatherProvider {
         current: uvCurrent,
         high: uvHigh
       },
+      // Current dew point (°F under units=imperial). Always emitted; whether
+      // it's displayed is a per-location choice — index.js strips this field
+      // for locations without `showDewPoint`, and the layout renders the
+      // UV/DP stack only when the field is present.
+      dew_point: current.dew_point != null ? Math.round(current.dew_point) : null,
       sun: {
         sunrise: sunrise,
         sunset: sunset,

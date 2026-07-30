@@ -99,7 +99,7 @@ const DEFAULT_ICON_SCALE = 0.8;
 // Drawn as inline SVG. Optionally accepts a `label` (e.g. "uv") that gets
 // overlaid via an absolutely-positioned flex-centered div so font metrics
 // handle the centering — SVG dominantBaseline alignment is unreliable.
-function SunIcon({ size, label }) {
+function SunIcon({ size, label, color = FG }) {
   const cx = size / 2;
   const cy = size / 2;
   const circleR = size * 0.30;
@@ -143,7 +143,7 @@ function SunIcon({ size, label }) {
           cx={cx}
           cy={cy}
           r={circleR}
-          stroke={FG}
+          stroke={color}
           strokeWidth={strokeW}
           fill={BG}
         />
@@ -154,7 +154,7 @@ function SunIcon({ size, label }) {
             y1={ray.y1}
             x2={ray.x2}
             y2={ray.y2}
-            stroke={FG}
+            stroke={color}
             strokeWidth={strokeW}
             strokeLinecap="round"
           />
@@ -165,7 +165,7 @@ function SunIcon({ size, label }) {
           style={{
             fontSize: labelFontSize,
             fontWeight: 700,
-            color: FG,
+            color,
             lineHeight: 1,
             fontFamily: 'FiraSans',
           }}
@@ -173,6 +173,52 @@ function SunIcon({ size, label }) {
           {label}
         </div>
       )}
+    </div>
+  );
+}
+
+// Dew-point icon — a stroked teardrop matching SunIcon's stroke weight.
+// Its vertical extent (tip to bottom of bulb) is 0.60 × size, centered —
+// the same footprint as SunIcon's core circle (r = 0.30) — so the UV and
+// DP rows share one visual rhythm.
+function DropIcon({ size, color = FG }) {
+  const r = size * 0.21;          // bulb radius
+  const strokeW = Math.max(3, Math.round(size * 0.05));
+  const cx = size / 2;
+  const tipY = size * 0.20;       // top of the 0.60-tall extent
+  const bulbY = size * 0.80 - r;  // bulb bottom lands at 0.80 × size
+
+  // Teardrop: tip at top, cubic curves flaring into a near-circular bulb.
+  const path = [
+    `M ${cx} ${tipY}`,
+    `C ${cx - r * 0.55} ${bulbY - r * 1.6}, ${cx - r} ${bulbY - r * 0.75}, ${cx - r} ${bulbY}`,
+    `A ${r} ${r} 0 1 0 ${cx + r} ${bulbY}`,
+    `C ${cx + r} ${bulbY - r * 0.75}, ${cx + r * 0.55} ${bulbY - r * 1.6}, ${cx} ${tipY}`,
+    'Z',
+  ].join(' ');
+
+  return (
+    <div
+      style={{
+        width: size,
+        height: size,
+        display: 'flex',
+        flexShrink: 0,
+      }}
+    >
+      <svg
+        width={size}
+        height={size}
+        viewBox={`0 0 ${size} ${size}`}
+      >
+        <path
+          d={path}
+          stroke={color}
+          strokeWidth={strokeW}
+          strokeLinejoin="round"
+          fill={BG}
+        />
+      </svg>
     </div>
   );
 }
@@ -240,6 +286,63 @@ export function WeatherIcon({ weather, isDay, size }) {
   );
 }
 
+// ─── hero stat rows ──────────────────────────────────────────────────────────
+// Shared building blocks for the small stat stacks in the hero: the H/L
+// temperatures, and (for locations with the dew-point feature) the UV/DP
+// block. Every stat is one HeroStat row of fixed height, and stacks are
+// plain flex columns of rows with no extra gap — so any two stacks sitting
+// side by side share the same vertical rails and their values align by
+// construction, not by coincidence.
+//
+// HERO_STAT_ROW_H reproduces the metrics the H/L text block historically
+// had (48px type on a 1.2 line box): a 48px lineHeight-1 value centered in
+// a 57.6px row lands on exactly the same pixels half-leading centering did.
+const HERO_STAT_FONT = 48;
+const HERO_STAT_ROW_H = HERO_STAT_FONT * 1.2;
+
+// Type for a stat's value text (H/L lines use it for the whole string).
+const HERO_STAT_VALUE_STYLE = {
+  fontSize: HERO_STAT_FONT,
+  fontWeight: 700,
+  color: FG_MUTED,
+  lineHeight: 1,
+};
+
+// One stat row. With `icon`, it renders centered in a fixed-width column —
+// the hero icons differ in visual width (sun rays vs slim drop), and
+// centering keeps their vertical axes aligned row to row — followed by the
+// value children. Without `icon`, the children span the row directly
+// (H/L's prefix letter lives in its value string).
+function HeroStat({ icon, children }) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'row',
+        alignItems: 'center',
+        height: HERO_STAT_ROW_H,
+      }}
+    >
+      {icon && (
+        <div
+          style={{
+            width: 48,
+            height: 48,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0,
+            marginRight: 12,
+          }}
+        >
+          {icon}
+        </div>
+      )}
+      {children}
+    </div>
+  );
+}
+
 function Hero({ data }) {
   return (
     <div
@@ -283,53 +386,85 @@ function Hero({ data }) {
           style={{
             display: 'flex',
             flexDirection: 'column',
-            justifyContent: 'center',
             marginLeft: 20,
             alignSelf: 'center',
-            fontSize: 48,
-            fontWeight: 700,
-            color: FG_MUTED,
-            lineHeight: 1.2,
           }}
         >
-          <div>{`H ${data.temperature.high}°`}</div>
-          <div>{`L ${data.temperature.low}°`}</div>
+          <HeroStat>
+            <div style={HERO_STAT_VALUE_STYLE}>{`H ${data.temperature.high}°`}</div>
+          </HeroStat>
+          <HeroStat>
+            <div style={HERO_STAT_VALUE_STYLE}>{`L ${data.temperature.low}°`}</div>
+          </HeroStat>
         </div>
 
-        {/* UV block pushed to right edge */}
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'row',
-            alignItems: 'center',
-            marginLeft: 'auto',
-            marginTop: 24,
-          }}
-        >
-          <SunIcon size={64} label="UV" />
+        {/* Right edge: UV block. When a dew point is present (per-location
+            feature), the big UV number shrinks into a two-row stack — UV on
+            top, dew point below — sized to match the H/L stack's height. */}
+        {data.dew_point == null ? (
           <div
             style={{
-              fontSize: 120,
-              fontWeight: 700,
-              color: FG,
-              lineHeight: 0.9,
-              marginLeft: 12,
+              display: 'flex',
+              flexDirection: 'row',
+              alignItems: 'center',
+              marginLeft: 'auto',
+              marginTop: 24,
             }}
           >
-            {String(data.uv.current)}
+            <SunIcon size={64} label="UV" />
+            <div
+              style={{
+                fontSize: 120,
+                fontWeight: 700,
+                color: FG,
+                lineHeight: 0.9,
+                marginLeft: 12,
+              }}
+            >
+              {String(data.uv.current)}
+            </div>
+            <div
+              style={{
+                fontSize: 56,
+                fontWeight: 600,
+                color: FG_MUTED,
+                lineHeight: 0.9,
+                marginLeft: 10,
+              }}
+            >
+              {String(data.uv.high)}
+            </div>
           </div>
+        ) : (
           <div
             style={{
-              fontSize: 56,
-              fontWeight: 600,
-              color: FG_MUTED,
-              lineHeight: 0.9,
-              marginLeft: 10,
+              display: 'flex',
+              flexDirection: 'column',
+              marginLeft: 'auto',
+              // Nudge off the right edge so the stack sits roughly centered
+              // in the footprint the big-UV block occupies when the dew
+              // point is off (~185px wide vs this stack's ~145px).
+              marginRight: 20,
+              alignSelf: 'center',
             }}
           >
-            {String(data.uv.high)}
+            {/* UV row. The sun is drawn at 36px (vs the drop's 48): its rays
+                span 0.96 × size vs the drop's 0.60, so at equal size it
+                towers over the teardrop; 36px puts its core circle at the
+                drop bulb's diameter. Current UV leads at full size; the
+                daily max trails two sizes down (48 → 40). */}
+            <HeroStat icon={<SunIcon size={36} color={FG_MUTED} />}>
+              <div style={HERO_STAT_VALUE_STYLE}>{String(data.uv.current)}</div>
+              <div style={{ ...HERO_STAT_VALUE_STYLE, fontSize: 40, marginLeft: 12 }}>
+                {String(data.uv.high)}
+              </div>
+            </HeroStat>
+            {/* Dew point row: droplet icon, current dew point */}
+            <HeroStat icon={<DropIcon size={48} color={FG_MUTED} />}>
+              <div style={HERO_STAT_VALUE_STYLE}>{`${data.dew_point}°`}</div>
+            </HeroStat>
           </div>
-        </div>
+        )}
       </div>
 
       {/* TODO: wind display — position and styling TBD. */}
