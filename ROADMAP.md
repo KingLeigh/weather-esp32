@@ -150,6 +150,21 @@ Remaining:
 - Tunables if living with it suggests: `RAIN_FULL_MM` (7.6 — drop toward 4–5 for
   more height range on common rain), the bucket boundaries, `MIN_BAR_PX`.
 
+### Per-location dew-point display — ✅ Shipped
+Locations with `showDewPoint` enabled (per-location flag in the KV `locations`
+entries, toggled from `/admin`; default off) swap the hero's large UV number for
+a **two-row UV/DP stack**: a muted sun icon with current UV + smaller daily max,
+and a muted teardrop with the current dew point. The provider always emits
+`dew_point` (OWM `current.dew_point`); the Worker strips it for non-flagged
+locations, which both selects the original hero and keeps dew-point flutter out
+of the render hash. Toggling the flag busts that zip's render cache
+automatically. Under the hood the H/L and UV/DP stacks were rebuilt on shared
+`HeroStat` rows (fixed 57.6 px pitch), so their values align by construction —
+verified byte-identical to the previous H/L rendering.
+
+Remaining:
+- Muted (#333) icons + teardrop unverified on the physical panel.
+
 ### Severe weather alerts
 The OpenWeatherMap `alerts` field is currently excluded. Explore surfacing alerts
 with severity filtering; the main concern is over-alerting on minor advisories.

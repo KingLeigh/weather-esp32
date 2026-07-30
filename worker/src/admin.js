@@ -41,6 +41,7 @@ export function adminPageHtml() {
 
     .error { color: #ef4444; font-size: 14px; margin-top: 8px; }
     .preview-link { font-size: 13px; color: #2563eb; }
+    .checkbox-label { font-size: 14px; color: #444; display: flex; align-items: center; gap: 6px; cursor: pointer; }
   </style>
 </head>
 <body>
@@ -59,6 +60,7 @@ export function adminPageHtml() {
       <input id="add-lat" placeholder="Latitude" required>
       <input id="add-lon" placeholder="Longitude" required>
     </div>
+    <label class="checkbox-label"><input type="checkbox" id="add-dewpoint"> Show dew point (replaces the large UV display)</label>
     <button type="submit" class="btn-add">Add Location</button>
     <div id="add-error" class="error"></div>
   </form>
@@ -108,6 +110,9 @@ export function adminPageHtml() {
             <a class="preview-link" href="/weather/\${loc.zip}.png" target="_blank">Preview PNG</a>
           </div>
           <div class="actions">
+            <label class="checkbox-label"><input type="checkbox" \${loc.showDewPoint ? 'checked' : ''} onchange="setDewPoint('\${loc.zip}', this.checked)"> Show dew point</label>
+          </div>
+          <div class="actions">
             <button class="btn-remove" onclick="removeLocation('\${loc.zip}')">Remove</button>
           </div>
         </div>
@@ -151,6 +156,14 @@ export function adminPageHtml() {
       return res.json();
     }
 
+    async function setDewPoint(zip, on) {
+      const result = await post({ action: 'update_location', zip, showDewPoint: on });
+      if (result.ok) {
+        state.locations = result.locations;
+        render();
+      }
+    }
+
     async function removeLocation(zip) {
       if (!confirm('Remove ' + zip + '?')) return;
       const result = await post({ action: 'remove_location', zip });
@@ -171,6 +184,7 @@ export function adminPageHtml() {
         lat: document.getElementById('add-lat').value.trim(),
         lon: document.getElementById('add-lon').value.trim(),
         label: document.getElementById('add-label').value.trim(),
+        showDewPoint: document.getElementById('add-dewpoint').checked,
       });
 
       if (result.error) {

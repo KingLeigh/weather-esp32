@@ -63,7 +63,7 @@ export default {
         return new Response(`Unknown zip code: ${zip}`, { status: 404 });
       }
       try {
-        const weatherData = await fetchWeatherData(env, `${loc.lat},${loc.lon}`);
+        const weatherData = await fetchWeatherForLocation(env, loc);
         return jsonResponse(weatherData);
       } catch (error) {
         return new Response(`Fetch failed: ${error.message}`, { status: 500 });
@@ -158,7 +158,7 @@ export default {
 
     for (const loc of locations) {
       try {
-        const weatherData = await fetchWeatherData(env, `${loc.lat},${loc.lon}`);
+        const weatherData = await fetchWeatherForLocation(env, loc);
 
         // Hash weather data to detect changes. Keep the DATE (not the minute)
         // of `updated` so a re-render fires when the local day rolls over —
@@ -239,8 +239,36 @@ async function handleAdminPost(request, env) {
       return jsonResponse({ error: `Zip ${zip} already exists` }, 400);
     }
 
-    locations.push({ zip, lat: String(lat), lon: String(lon), label: label || zip });
+    locations.push({
+      zip,
+      lat: String(lat),
+      lon: String(lon),
+      label: label || zip,
+      showDewPoint: Boolean(body.showDewPoint),
+    });
     await env.WEATHER_KV.put('locations', JSON.stringify(locations));
+    return jsonResponse({ ok: true, locations });
+  }
+
+  if (action === 'update_location') {
+    const { zip } = body;
+    if (!zip) return jsonResponse({ error: 'zip is required' }, 400);
+
+    const locations = await getLocations(env);
+    const loc = locations.find((l) => l.zip === zip);
+    if (!loc) return jsonResponse({ error: `Unknown zip: ${zip}` }, 400);
+
+    if ('showDewPoint' in body) loc.showDewPoint = Boolean(body.showDewPoint);
+    await env.WEATHER_KV.put('locations', JSON.stringify(locations));
+
+    // Bust this location's render cache: config changes alter the render
+    // without changing the weather data, so the hash-based skip would
+    // otherwise keep serving the old PNG until the weather itself moved.
+    await Promise.all([
+      env.WEATHER_KV.delete(`render_png:${zip}`),
+      env.WEATHER_KV.delete(`render_updated:${zip}`),
+      env.WEATHER_KV.delete(`render_hash:${zip}`),
+    ]);
     return jsonResponse({ ok: true, locations });
   }
 
@@ -293,7 +321,7 @@ async function serveWeatherPng(env, loc) {
     }
 
     // Cache miss — render on demand.
-    const weatherData = await fetchWeatherData(env, `${loc.lat},${loc.lon}`);
+    const weatherData = await fetchWeatherForLocation(env, loc);
     const png = await renderWeatherPng(weatherData, { location: loc.zip });
     await Promise.all([
       env.WEATHER_KV.put(`render_png:${loc.zip}`, png, { expirationTtl: KV_TTL }),
@@ -303,6 +331,17 @@ async function serveWeatherPng(env, loc) {
   } catch (error) {
     return new Response(`Render failed: ${error.message}`, { status: 500 });
   }
+}
+
+// Fetch weather for a location entry and shape it per the location's config.
+// `showDewPoint` gates the dew-point display: the provider always emits
+// `dew_point`, and stripping it here (a) makes the layout render the plain
+// big-UV hero, and (b) keeps it out of the render hash, so locations without
+// the feature don't re-render on dew-point-only changes.
+async function fetchWeatherForLocation(env, loc) {
+  const weatherData = await fetchWeatherData(env, `${loc.lat},${loc.lon}`);
+  if (!loc.showDewPoint) delete weatherData.dew_point;
+  return weatherData;
 }
 
 async function fetchWeatherData(env, location) {
