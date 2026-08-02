@@ -88,11 +88,16 @@ spot.
   gives it an honest 7%). Trace visibility is handled by a `MIN_BAR_PX = 4`
   floor for any nonzero amount, not by a curve. If linear feels too timid after
   living with it, try exponent 0.7 before going back to sqrt.
-- **Shade = 3 discrete probability buckets**, not a continuous ramp (a ramp is
-  false precision on a 16-level panel with grainy fills): low chance `#ddd`,
-  likely `#bbb`, definitely `#999`. All ≥2 4bpp steps (0x22) apart so adjacent
-  buckets stay distinguishable. Boundaries (user-confirmed 2026-07-15): <40%
-  low, 40–75% likely, >75% definitely.
+- **Shade = 4 discrete probability buckets**, not a continuous ramp (a ramp is
+  false precision on a 16-level panel with grainy fills). REVISED 2026-08-02
+  (was 3 buckets `#ddd`/`#bbb`/`#999` with 2-step gaps): `#ddd` proved
+  invisible on the physical panel, so the floor moved to `#ccc` (the proven
+  old rain-bar grey) and the top split so `#999` means near-certain. Current
+  mapping: <40% `#ccc` · 40–74% `#bbb` · 75–89% `#aaa` · ≥90% `#999`.
+  Adjacent buckets are 1 4bpp step apart — enough for relative reading between
+  neighboring bars (user call: with 4 ordered options, absolute
+  identification of an isolated bar matters less); ⚠️ if panel graininess
+  smears 1-step neighbors, re-widen the lookup.
 - **Snow = the same 3 shade buckets + a black 2px DOTTED outline**
   (`strokeDasharray="3 3"`, `crispEdges`), retiring the fixed `#666` snow fill.
   One probability legend for both precip types; outline-vs-solid carries the
@@ -299,8 +304,9 @@ Resolved with the user 2026-07-15:
   threshold) — single-constant change.
 - Curve: **linear**, with a `MIN_BAR_PX = 4` floor for trace visibility (the
   sqrt curve re-inflated drizzle; see §3). If too timid, try exponent 0.7.
-- Probability: 3 discrete shade buckets (`#ddd`/`#bbb`/`#999`), not a
-  continuous ramp.
+- Probability: discrete shade buckets, not a continuous ramp. Originally 3
+  (`#ddd`/`#bbb`/`#999`); revised 2026-08-02 to 4 (`#ccc`/`#bbb`/`#aaa`/`#999`,
+  boundaries 40/75/90) after `#ddd` proved invisible on the device — see §3.
 - Independent height+shade confirmed (vs a blended pop×amount "expected
   rainfall" bar) — keeps both signals.
 - Snow: same shade buckets + black outline (see §3); `#666` retired.

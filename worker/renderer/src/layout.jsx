@@ -54,11 +54,14 @@ const precipBarH = (mm, usableH) => {
   return Math.max(MIN_BAR_PX, Math.min(1, mm / RAIN_FULL_MM) * usableH);
 };
 
-// Bar SHADE = probability, in 3 discrete buckets — a continuous ramp is false
-// precision on the panel's 16 grey levels. Buckets are ≥2 4bpp steps (0x22)
-// apart so they stay distinguishable despite grainy fills, and the darkest
-// stays light enough that the temp line/labels never need halos.
-const precipShade = (pop) => (pop > 75 ? '#999' : pop >= 40 ? '#bbb' : '#ddd');
+// Bar SHADE = probability, in 4 discrete buckets — a continuous ramp is false
+// precision on the panel's 16 grey levels. Adjacent buckets are 1 4bpp step
+// apart: enough to read relative differences between neighboring bars, with
+// the floor at #ccc (the old rain-bar grey — #ddd proved invisible on the
+// physical panel) and the ceiling at #999 so the temp line/labels never need
+// halos. All four are native 4bpp levels, so no dithering between them.
+const precipShade = (pop) =>
+  pop >= 90 ? '#999' : pop >= 75 ? '#aaa' : pop >= 40 ? '#bbb' : '#ccc';
 
 // Mapping from the normalized `weather` strings to Erik Flowers Weather
 // Icons codepoints (Private Use Area of the WeatherIcons TTF). Each entry
