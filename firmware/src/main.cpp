@@ -116,11 +116,16 @@ enum MenuItem {
 #define QR_ECC         ECC_MEDIUM
 #define QR_MODULE_PX   6   // 6 × 33 = 198 px QR data, leaves ~21 px white margin
 
-// OLD threshold: show the OLD code when the server's data (X-Updated) is older
-// than this. OLD now means a real, ongoing *server-side* staleness issue (the
-// fetch succeeded, so connectivity is fine) — NET/SRV cover the connectivity
-// failures separately — so the fuse is longer than when this also stood in for
-// bad WiFi.
+// OLD threshold — FALLBACK ONLY (v10+). The server now states each location's
+// staleness budget itself: X-Data-Age (seconds since the data was rendered,
+// computed server-side, so no device clock or timezone is involved) and
+// X-Stale-After (how old is too old: ~60 min for weather, ~26 h for the
+// daily-cadence snow report). When both headers are present, OLD means
+// X-Data-Age > X-Stale-After. When they're absent (older server), we fall
+// back to the original rule: X-Updated parsed as local time vs the device
+// clock, stale past this many minutes. OLD still means a real, ongoing
+// *server-side* staleness issue (the fetch succeeded, so connectivity is
+// fine) — NET/SRV cover the connectivity failures separately.
 #define STALE_THRESHOLD_MIN  60
 
 // OTA updates are discovered for free: the worker advertises the latest
@@ -264,6 +269,8 @@ static uint16_t line_rgb565[EPD_WIDTH + 16];
 static uint8_t  *pngBuf     = nullptr;
 static int32_t   pngLen     = 0;
 static char      updatedStr[32] = {0};  // X-Updated header value
+static long      dataAgeSec     = -1;   // X-Data-Age header (seconds); -1 = absent
+static long      staleAfterSec  = -1;   // X-Stale-After header (seconds); -1 = absent
 static int       lastHttpCode   = 0;    // HTTP status from the last fetchPng()
 static int       latestFirmwareAvail = 0;  // X-Firmware-Latest from the weather fetch
 
@@ -488,7 +495,11 @@ static time_t parseTimestamp(const char *ts) {
 }
 
 // Returns age in minutes, or -1 if we can't determine it.
+// Prefers the server-computed X-Data-Age (no device clock involved, so immune
+// to the EST5EDT-vs-location timezone mismatch); falls back to parsing
+// X-Updated against the device clock when the server didn't send it.
 static int getAgeMinutes(const char *ts) {
+    if (dataAgeSec >= 0) return (int)(dataAgeSec / 60);
     time_t now;
     time(&now);
     time_t dt = parseTimestamp(ts);
@@ -497,17 +508,27 @@ static int getAgeMinutes(const char *ts) {
     return secs < 0 ? 0 : secs / 60;
 }
 
+// True when the on-screen data has outlived its staleness budget (drives the
+// OLD status code). The budget is the server's X-Stale-After when present —
+// each location knows its own cadence (60 min weather, 26 h daily snow) — and
+// the legacy fixed STALE_THRESHOLD_MIN against X-Updated otherwise.
+static bool dataIsStale() {
+    if (staleAfterSec > 0 && dataAgeSec >= 0) return dataAgeSec > staleAfterSec;
+    int ageMin = getAgeMinutes(updatedStr);
+    return ageMin > STALE_THRESHOLD_MIN;
+}
+
 // ─── status: highest-priority code drawn into framebuffer ────────────────────
 // Drawn after PNG decode, in the bottom-right ~200×44 px reserved region.
 
 // Returns the highest-priority active status code, or ST_NONE if healthy.
 // Predicates are evaluated most-severe-first; the first match wins, so only the
 // single worst problem is ever surfaced.
-static int computeStatus(bool net_failed, bool srv_failed, int age_min, bool battery_low) {
-    if (net_failed)                    return ST_NET;
-    if (srv_failed)                    return ST_SRV;
-    if (age_min > STALE_THRESHOLD_MIN) return ST_OLD;
-    if (battery_low)                   return ST_BAT;
+static int computeStatus(bool net_failed, bool srv_failed, bool data_stale, bool battery_low) {
+    if (net_failed)    return ST_NET;
+    if (srv_failed)    return ST_SRV;
+    if (data_stale)    return ST_OLD;
+    if (battery_low)   return ST_BAT;
     return ST_NONE;
 }
 
@@ -600,8 +621,8 @@ static bool fetchPng(const char *url) {
     http.setTimeout(15000);
     http.setConnectTimeout(10000);
 
-    const char *headerKeys[] = {"X-Updated", "X-Firmware-Latest"};
-    http.collectHeaders(headerKeys, 2);
+    const char *headerKeys[] = {"X-Updated", "X-Firmware-Latest", "X-Data-Age", "X-Stale-After"};
+    http.collectHeaders(headerKeys, 4);
 
     Serial.printf("GET %s\n", url);
     int httpCode = http.GET();
@@ -620,6 +641,15 @@ static bool fetchPng(const char *url) {
     strncpy(updatedStr, hdr.c_str(), sizeof(updatedStr) - 1);
     updatedStr[sizeof(updatedStr) - 1] = '\0';
     Serial.printf("X-Updated: %s\n", updatedStr);
+
+    // Capture the server-stated staleness pair (v10+). An absent header stays
+    // -1, which routes dataIsStale() to the legacy X-Updated fallback —
+    // distinct from a legitimate "0" (data rendered this very second).
+    String ageHdr   = http.header("X-Data-Age");
+    String budgetHdr = http.header("X-Stale-After");
+    dataAgeSec    = ageHdr.length()    ? ageHdr.toInt()    : -1;
+    staleAfterSec = budgetHdr.length() ? budgetHdr.toInt() : -1;
+    Serial.printf("X-Data-Age: %ld  X-Stale-After: %ld\n", dataAgeSec, staleAfterSec);
 
     // Capture X-Firmware-Latest — the newest firmware version available to this
     // device. Drives free OTA discovery (see the OTA step in setup()).
@@ -1511,10 +1541,11 @@ void setup() {
     int  battMv   = readBatteryMillivolts();
     bool battLow  = batteryIsLow(battMv);
     int  ageMin   = getAgeMinutes(updatedStr);
-    int  status   = computeStatus(!wifiOk, wifiOk && !fetchOk, ageMin, battLow);
+    bool stale    = dataIsStale();
+    int  status   = computeStatus(!wifiOk, wifiOk && !fetchOk, stale, battLow);
 
-    Serial.printf("Battery: %d mV (low=%d)  Age: %d min  WiFi: %s  Status: %s\n",
-                  battMv, battLow, ageMin, wifiOk ? "ok" : "FAIL",
+    Serial.printf("Battery: %d mV (low=%d)  Age: %d min (budget %lds, stale=%d)  WiFi: %s  Status: %s\n",
+                  battMv, battLow, ageMin, staleAfterSec, stale, wifiOk ? "ok" : "FAIL",
                   status == ST_NONE ? "OK" : STATUS_CODES[status]);
 
     // ── WiFi-failure streak (drives the no-WiFi splash fallback) ─────────
