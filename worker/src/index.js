@@ -220,12 +220,21 @@ function locationType(loc) {
   return loc.type === 'snow' ? 'snow' : 'weather';
 }
 
-/** Today's 'YYYY-MM-DD' in an IANA timezone (en-CA formats as ISO). */
+// Snow renders happen on the first poll after this hour, location-local —
+// not at midnight. By 5am yesterday's analysis value has settled (Open-Meteo
+// keeps refining recent days as observations assimilate), and the day's
+// forecast is as fresh as possible when the display is actually looked at.
+const SNOW_RENDER_LOCAL_HOUR = 5;
+
+/** The current snow "render day" ('YYYY-MM-DD') in an IANA timezone: the
+ * local date as of SNOW_RENDER_LOCAL_HOUR hours ago, so the date doesn't
+ * roll over (and trigger a render) until 5am local. */
 function localToday(timezone) {
+  const shifted = new Date(Date.now() - SNOW_RENDER_LOCAL_HOUR * 3600 * 1000);
   try {
-    return new Intl.DateTimeFormat('en-CA', { timeZone: timezone }).format(new Date());
+    return new Intl.DateTimeFormat('en-CA', { timeZone: timezone }).format(shifted);
   } catch {
-    return new Intl.DateTimeFormat('en-CA', { timeZone: 'UTC' }).format(new Date());
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'UTC' }).format(shifted);
   }
 }
 
