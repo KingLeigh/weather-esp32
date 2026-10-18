@@ -129,6 +129,34 @@ Follow-ups:
 
 ## Server (Cloudflare Worker)
 
+### Snow-report display type — ✅ Shipped (v1)
+A second display type for ski-season devices: locations with `type: 'snow'`
+render a snow report instead of the weather display. Hero shows the resort
+name/elevation, season-to-date snowfall (actuals through yesterday) and a
+"% of median" snow-o-meter (vs the 15 prior seasons over the same Oct-1-based
+elapsed window). Below, a 15-day bar chart: 7 days actual (solid), today + 7
+forecast (dotted — a morning render is mostly forecast). Chart scale fixed at
+12", expanding only past it. Data: Open-Meteo (free, no key, global — Niseko
+validated), elevation-downscaled; season totals accumulate in KV, self-healing
+via the 7-past-days window with archive re-sync; the median curve computes
+once per season from one archive call. Snow locations poll once per
+location-local day; devices need no firmware change (5-digit ID + existing
+setup flow). OWM continues to serve the weather display type unchanged.
+
+Remaining / follow-ups:
+- **`OLD` status code on snow devices** — the firmware flags data >60 min
+  stale, but a snow display updates daily AND X-Updated is location-local
+  (Mountain time vs the device's hardcoded EST5EDT NTP), so a snow device
+  would show `OLD` perpetually. Needs a firmware-side staleness policy (or a
+  server staleness-threshold hint header); related to the long-standing
+  EST5EDT TODO.
+- Eyeball the layout on the physical panel (greys, dotted outlines).
+- **Snow-o-meter gauge widget** — replace the bare % with a dial drawn on the
+  10-15-yr worst→best range, tick at the median (the % number stays).
+- Southern-hemisphere season start (per-location rule) if a NZ/Chile resort
+  is ever added. Early-season gate is minimal (median ≥ 5" else "—").
+- Two-resort split-screen variant (layout is componentized for it).
+
 ### Rain chart representation — ✅ Shipped (PRs #8, #9)
 The hourly chart's precip bars no longer spend their strongest visual channel on
 bare probability. **Bar height = amount** (linear to 7.6 mm/h — the NWS/AMS
