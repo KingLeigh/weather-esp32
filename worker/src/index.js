@@ -1,4 +1,5 @@
 import { createProvider } from './providers/index.js';
+import { fetchSnowReport, snowStateKeys } from './providers/open-meteo-snow.js';
 import { renderWeatherPng } from './render.jsx';
 import { adminPageHtml } from './admin.js';
 
@@ -19,6 +20,10 @@ import { adminPageHtml } from './admin.js';
 // ─── constants ───────────────────────────────────────────────────────────────
 
 const KV_TTL = 3600;             // 1 hour
+// Snow reports refresh once a day, so their cached PNG must outlive a day
+// (plus margin) or every device wake past the first hour would trigger an
+// on-demand re-render.
+const KV_TTL_SNOW = 26 * 3600;
 const MAX_LOCATIONS = 5;
 const MIN_POLL_MINUTES = 3;
 const DEFAULT_POLL_MINUTES = 5;
@@ -158,6 +163,16 @@ export default {
 
     for (const loc of locations) {
       try {
+        // Snow locations refresh once per location-local day, not every poll:
+        // their data source updates daily and their API budget is one
+        // forecast call per day (plus rare archive re-syncs).
+        if (locationType(loc) === 'snow') {
+          const rendered = await env.WEATHER_KV.get(`snow_rendered:${loc.zip}`, 'json');
+          if (rendered && rendered.date === localToday(rendered.timezone)) {
+            continue;
+          }
+        }
+
         const weatherData = await fetchWeatherForLocation(env, loc);
 
         // Hash weather data to detect changes. Keep the DATE (not the minute)
@@ -168,21 +183,27 @@ export default {
         const newHash = simpleHash(JSON.stringify(dataForHash));
         const prevHash = await env.WEATHER_KV.get(`render_hash:${loc.zip}`);
 
+        const ttl = locationType(loc) === 'snow' ? KV_TTL_SNOW : KV_TTL;
+
         if (prevHash === newHash) {
           // Data unchanged — just refresh the timestamp.
           console.log(`[${loc.zip}] unchanged, refreshing timestamp`);
-          await env.WEATHER_KV.put(`render_updated:${loc.zip}`, weatherData.updated, {
-            expirationTtl: KV_TTL,
-          });
+          await Promise.all([
+            env.WEATHER_KV.put(`render_updated:${loc.zip}`, weatherData.updated, {
+              expirationTtl: ttl,
+            }),
+            ...markSnowRendered(env, loc, weatherData),
+          ]);
           continue;
         }
 
         console.log(`[${loc.zip}] changed, rendering PNG...`);
         const png = await renderWeatherPng(weatherData, { location: loc.zip });
         await Promise.all([
-          env.WEATHER_KV.put(`render_png:${loc.zip}`, png, { expirationTtl: KV_TTL }),
-          env.WEATHER_KV.put(`render_updated:${loc.zip}`, weatherData.updated, { expirationTtl: KV_TTL }),
-          env.WEATHER_KV.put(`render_hash:${loc.zip}`, newHash, { expirationTtl: KV_TTL }),
+          env.WEATHER_KV.put(`render_png:${loc.zip}`, png, { expirationTtl: ttl }),
+          env.WEATHER_KV.put(`render_updated:${loc.zip}`, weatherData.updated, { expirationTtl: ttl }),
+          env.WEATHER_KV.put(`render_hash:${loc.zip}`, newHash, { expirationTtl: ttl }),
+          ...markSnowRendered(env, loc, weatherData),
         ]);
         console.log(`[${loc.zip}] PNG updated (${png.length} bytes)`);
       } catch (error) {
@@ -191,6 +212,35 @@ export default {
     }
   },
 };
+
+// ─── display types ───────────────────────────────────────────────────────────
+
+/** 'weather' (default) or 'snow'. Entries predating the type field are weather. */
+function locationType(loc) {
+  return loc.type === 'snow' ? 'snow' : 'weather';
+}
+
+/** Today's 'YYYY-MM-DD' in an IANA timezone (en-CA formats as ISO). */
+function localToday(timezone) {
+  try {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: timezone }).format(new Date());
+  } catch {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'UTC' }).format(new Date());
+  }
+}
+
+/** KV put (as an array to spread into Promise.all) recording that a snow
+ * location has data for its current local day — the cron's daily gate. */
+function markSnowRendered(env, loc, data) {
+  if (locationType(loc) !== 'snow') return [];
+  return [
+    env.WEATHER_KV.put(
+      `snow_rendered:${loc.zip}`,
+      JSON.stringify({ date: data.date, timezone: data.timezone }),
+      { expirationTtl: KV_TTL_SNOW },
+    ),
+  ];
+}
 
 // ─── location management ─────────────────────────────────────────────────────
 
@@ -239,13 +289,25 @@ async function handleAdminPost(request, env) {
       return jsonResponse({ error: `Zip ${zip} already exists` }, 400);
     }
 
-    locations.push({
+    const entry = {
       zip,
       lat: String(lat),
       lon: String(lon),
       label: label || zip,
       showDewPoint: Boolean(body.showDewPoint),
-    });
+    };
+    // 'snow' entries render the snow-report display from Open-Meteo instead
+    // of the weather display from OWM. Elevation (feet) steers Open-Meteo's
+    // downscaling to the resort's altitude rather than the grid-cell mean.
+    if (body.type === 'snow') {
+      entry.type = 'snow';
+      const elevation = parseInt(body.elevation_ft, 10);
+      if (!Number.isFinite(elevation) || elevation <= 0) {
+        return jsonResponse({ error: 'elevation_ft (feet) is required for snow locations' }, 400);
+      }
+      entry.elevation_ft = elevation;
+    }
+    locations.push(entry);
     await env.WEATHER_KV.put('locations', JSON.stringify(locations));
     return jsonResponse({ ok: true, locations });
   }
@@ -280,11 +342,13 @@ async function handleAdminPost(request, env) {
     locations = locations.filter((l) => l.zip !== zip);
     await env.WEATHER_KV.put('locations', JSON.stringify(locations));
 
-    // Clean up cached data for this location.
+    // Clean up cached data for this location (snow state keys are harmless
+    // no-op deletes for weather locations).
     await Promise.all([
       env.WEATHER_KV.delete(`render_png:${zip}`),
       env.WEATHER_KV.delete(`render_updated:${zip}`),
       env.WEATHER_KV.delete(`render_hash:${zip}`),
+      ...snowStateKeys(zip).map((k) => env.WEATHER_KV.delete(k)),
     ]);
     return jsonResponse({ ok: true, locations });
   }
@@ -323,9 +387,11 @@ async function serveWeatherPng(env, loc) {
     // Cache miss — render on demand.
     const weatherData = await fetchWeatherForLocation(env, loc);
     const png = await renderWeatherPng(weatherData, { location: loc.zip });
+    const ttl = locationType(loc) === 'snow' ? KV_TTL_SNOW : KV_TTL;
     await Promise.all([
-      env.WEATHER_KV.put(`render_png:${loc.zip}`, png, { expirationTtl: KV_TTL }),
-      env.WEATHER_KV.put(`render_updated:${loc.zip}`, weatherData.updated, { expirationTtl: KV_TTL }),
+      env.WEATHER_KV.put(`render_png:${loc.zip}`, png, { expirationTtl: ttl }),
+      env.WEATHER_KV.put(`render_updated:${loc.zip}`, weatherData.updated, { expirationTtl: ttl }),
+      ...markSnowRendered(env, loc, weatherData),
     ]);
     return pngResponse(png, weatherData.updated, firmwareLatest);
   } catch (error) {
@@ -333,12 +399,17 @@ async function serveWeatherPng(env, loc) {
   }
 }
 
-// Fetch weather for a location entry and shape it per the location's config.
+// Fetch display data for a location entry, dispatching on its type:
+// 'snow' locations go to the Open-Meteo snow provider; 'weather' locations
+// (the default) to the configured weather provider (OWM).
 // `showDewPoint` gates the dew-point display: the provider always emits
 // `dew_point`, and stripping it here (a) makes the layout render the plain
 // big-UV hero, and (b) keeps it out of the render hash, so locations without
 // the feature don't re-render on dew-point-only changes.
 async function fetchWeatherForLocation(env, loc) {
+  if (locationType(loc) === 'snow') {
+    return fetchSnowReport(env, loc);
+  }
   const weatherData = await fetchWeatherData(env, `${loc.lat},${loc.lon}`);
   if (!loc.showDewPoint) delete weatherData.dew_point;
   return weatherData;
