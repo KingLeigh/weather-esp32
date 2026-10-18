@@ -24,6 +24,15 @@ const KV_TTL = 3600;             // 1 hour
 // (plus margin) or every device wake past the first hour would trigger an
 // on-demand re-render.
 const KV_TTL_SNOW = 26 * 3600;
+// Staleness budgets advertised to the device via X-Stale-After (seconds):
+// how old this location's data may get before the firmware should show the
+// OLD status code. Weather re-renders every few minutes, so an hour means
+// something is genuinely wrong; snow renders once a day by design, so only
+// a missed daily render (26h+) is a problem. Firmware v9 ignores these
+// headers (it hardcodes 60 min); v10+ uses them, falling back to the old
+// behavior when they're absent.
+const STALE_AFTER_WEATHER = 3600;
+const STALE_AFTER_SNOW = 26 * 3600;
 const MAX_LOCATIONS = 5;
 const MIN_POLL_MINUTES = 3;
 const DEFAULT_POLL_MINUTES = 5;
@@ -186,12 +195,15 @@ export default {
         const ttl = locationType(loc) === 'snow' ? KV_TTL_SNOW : KV_TTL;
 
         if (prevHash === newHash) {
-          // Data unchanged — just refresh the timestamp.
+          // Data unchanged — just refresh the timestamps. render_at advances
+          // too: the data was re-verified current, so its age (X-Data-Age)
+          // restarts from this poll, not from the last pixel change.
           console.log(`[${loc.zip}] unchanged, refreshing timestamp`);
           await Promise.all([
             env.WEATHER_KV.put(`render_updated:${loc.zip}`, weatherData.updated, {
               expirationTtl: ttl,
             }),
+            env.WEATHER_KV.put(`render_at:${loc.zip}`, String(Date.now()), { expirationTtl: ttl }),
             ...markSnowRendered(env, loc, weatherData),
           ]);
           continue;
@@ -202,6 +214,7 @@ export default {
         await Promise.all([
           env.WEATHER_KV.put(`render_png:${loc.zip}`, png, { expirationTtl: ttl }),
           env.WEATHER_KV.put(`render_updated:${loc.zip}`, weatherData.updated, { expirationTtl: ttl }),
+          env.WEATHER_KV.put(`render_at:${loc.zip}`, String(Date.now()), { expirationTtl: ttl }),
           env.WEATHER_KV.put(`render_hash:${loc.zip}`, newHash, { expirationTtl: ttl }),
           ...markSnowRendered(env, loc, weatherData),
         ]);
@@ -338,6 +351,7 @@ async function handleAdminPost(request, env) {
     await Promise.all([
       env.WEATHER_KV.delete(`render_png:${zip}`),
       env.WEATHER_KV.delete(`render_updated:${zip}`),
+      env.WEATHER_KV.delete(`render_at:${zip}`),
       env.WEATHER_KV.delete(`render_hash:${zip}`),
     ]);
     return jsonResponse({ ok: true, locations });
@@ -356,6 +370,7 @@ async function handleAdminPost(request, env) {
     await Promise.all([
       env.WEATHER_KV.delete(`render_png:${zip}`),
       env.WEATHER_KV.delete(`render_updated:${zip}`),
+      env.WEATHER_KV.delete(`render_at:${zip}`),
       env.WEATHER_KV.delete(`render_hash:${zip}`),
       ...snowStateKeys(zip).map((k) => env.WEATHER_KV.delete(k)),
     ]);
@@ -377,10 +392,12 @@ async function handleAdminPost(request, env) {
 // ─── weather fetch + serve ───────────────────────────────────────────────────
 
 async function serveWeatherPng(env, loc) {
+  const staleAfter = locationType(loc) === 'snow' ? STALE_AFTER_SNOW : STALE_AFTER_WEATHER;
   try {
-    const [cachedPng, cachedUpdated, fwLatest] = await Promise.all([
+    const [cachedPng, cachedUpdated, cachedRenderAt, fwLatest] = await Promise.all([
       env.WEATHER_KV.get(`render_png:${loc.zip}`, 'arrayBuffer'),
       env.WEATHER_KV.get(`render_updated:${loc.zip}`, 'text'),
+      env.WEATHER_KV.get(`render_at:${loc.zip}`, 'text'),
       // Latest available firmware — advertised on every weather response so the
       // device discovers OTA updates for free (it self-updates when this exceeds
       // its own FIRMWARE_VERSION).
@@ -390,7 +407,13 @@ async function serveWeatherPng(env, loc) {
     const firmwareLatest = parseInt(fwLatest, 10) || 0;
 
     if (cachedPng) {
-      return pngResponse(cachedPng, cachedUpdated || '', firmwareLatest);
+      // X-Data-Age from the stored render epoch; null (header omitted, firmware
+      // falls back to X-Updated math) if the epoch predates this feature.
+      const renderAt = parseInt(cachedRenderAt, 10);
+      const ageSec = Number.isFinite(renderAt) && renderAt > 0
+        ? Math.max(0, Math.round((Date.now() - renderAt) / 1000))
+        : null;
+      return pngResponse(cachedPng, cachedUpdated || '', firmwareLatest, ageSec, staleAfter);
     }
 
     // Cache miss — render on demand.
@@ -400,9 +423,10 @@ async function serveWeatherPng(env, loc) {
     await Promise.all([
       env.WEATHER_KV.put(`render_png:${loc.zip}`, png, { expirationTtl: ttl }),
       env.WEATHER_KV.put(`render_updated:${loc.zip}`, weatherData.updated, { expirationTtl: ttl }),
+      env.WEATHER_KV.put(`render_at:${loc.zip}`, String(Date.now()), { expirationTtl: ttl }),
       ...markSnowRendered(env, loc, weatherData),
     ]);
-    return pngResponse(png, weatherData.updated, firmwareLatest);
+    return pngResponse(png, weatherData.updated, firmwareLatest, 0, staleAfter);
   } catch (error) {
     return new Response(`Render failed: ${error.message}`, { status: 500 });
   }
@@ -457,18 +481,27 @@ function jsonResponse(data, status = 200) {
   });
 }
 
-function pngResponse(pngBytes, updated, firmwareLatest = 0) {
-  return new Response(pngBytes, {
-    headers: {
-      'Content-Type': 'image/png',
-      'X-Updated': updated,
-      // Latest available firmware version. The device compares it to its own
-      // FIRMWARE_VERSION and self-updates if newer — free OTA discovery.
-      'X-Firmware-Latest': String(firmwareLatest),
-      'Cache-Control': 'public, max-age=300',
-      'Access-Control-Allow-Origin': '*',
-    },
-  });
+function pngResponse(pngBytes, updated, firmwareLatest = 0, ageSec = null, staleAfterSec = null) {
+  const headers = {
+    'Content-Type': 'image/png',
+    // Render time as location-local wall clock. Kept for compatibility and
+    // human readability (firmware v9 staleness; the debug screen's data-time
+    // line) — v10+ prefers the age/budget headers below, which are immune to
+    // the device-clock-vs-location timezone mismatch.
+    'X-Updated': updated,
+    // Latest available firmware version. The device compares it to its own
+    // FIRMWARE_VERSION and self-updates if newer — free OTA discovery.
+    'X-Firmware-Latest': String(firmwareLatest),
+    'Cache-Control': 'public, max-age=300',
+    'Access-Control-Allow-Origin': '*',
+  };
+  // Seconds since this PNG's data was rendered/verified, computed server-side
+  // so no device clock is involved. Omitted when unknown (pre-feature cache).
+  if (ageSec != null) headers['X-Data-Age'] = String(ageSec);
+  // This location's staleness budget: the firmware shows OLD only when
+  // X-Data-Age exceeds it (60 min weather, 26 h daily-cadence snow).
+  if (staleAfterSec != null) headers['X-Stale-After'] = String(staleAfterSec);
+  return new Response(pngBytes, { headers });
 }
 
 function binaryResponse(body) {

@@ -144,12 +144,15 @@ location-local day; devices need no firmware change (5-digit ID + existing
 setup flow). OWM continues to serve the weather display type unchanged.
 
 Remaining / follow-ups:
-- **`OLD` status code on snow devices** — the firmware flags data >60 min
-  stale, but a snow display updates daily AND X-Updated is location-local
-  (Mountain time vs the device's hardcoded EST5EDT NTP), so a snow device
-  would show `OLD` perpetually. Needs a firmware-side staleness policy (or a
-  server staleness-threshold hint header); related to the long-standing
-  EST5EDT TODO.
+- **`OLD` status code on snow devices — ✅ fixed (fw v10)**: the server now
+  states each location's staleness budget itself via two new headers —
+  `X-Data-Age` (seconds since render, computed server-side so no device clock
+  or timezone is involved) and `X-Stale-After` (60 min weather / 26 h snow).
+  Firmware v10 shows `OLD` only when age exceeds budget, falling back to the
+  legacy X-Updated + 60-min rule when the headers are absent; v9 ignores the
+  new headers entirely, so both directions stay compatible and `X-Updated`
+  is kept indefinitely. (The EST5EDT NTP hack no longer affects staleness,
+  though it still colors other displayed times.)
 - Eyeball the layout on the physical panel (greys, dotted outlines).
 - **Snow-o-meter gauge widget** — replace the bare % with a dial drawn on the
   10-15-yr worst→best range, tick at the median (the % number stays).
