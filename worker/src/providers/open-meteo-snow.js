@@ -88,7 +88,15 @@ async function fetchJson(url) {
     const body = await response.text();
     throw new Error(`Open-Meteo error: ${response.status} ${response.statusText} - ${body}`);
   }
-  return response.json();
+  const data = await response.json();
+  // Fail loudly if the API ever hands back a unit we don't expect — every
+  // downstream number (bars, season totals, the stored baseline) assumes
+  // inches, and a silent cm response is exactly the bug this guards against.
+  const unit = data.daily_units?.snowfall_sum;
+  if (unit !== 'inch') {
+    throw new Error(`Open-Meteo returned snowfall_sum in '${unit}', expected 'inch'`);
+  }
+  return data;
 }
 
 /** The daily forecast window: 7 past days + today + 7 forecast days. */
@@ -96,7 +104,10 @@ async function fetchForecastWindow(loc) {
   const url = `${FORECAST_URL}?latitude=${loc.lat}&longitude=${loc.lon}` +
     `&elevation=${loc.elevation_ft ? Math.round(loc.elevation_ft * 0.3048) : ''}` +
     `&daily=snowfall_sum&past_days=${PAST_DAYS}&forecast_days=${FORECAST_DAYS}` +
-    `&snowfall_unit=inch&timezone=auto`;
+    // NB: precipitation_unit is what converts snowfall_sum to inches — there
+    // is NO snowfall_unit parameter (the API silently ignores unknown params
+    // and returns cm). Verified against the response's daily_units field.
+    `&precipitation_unit=inch&timezone=auto`;
   const data = await fetchJson(url);
   const days = data.daily.time.map((date, i) => ({
     date,
@@ -112,7 +123,7 @@ async function fetchArchiveDaily(loc, startDate, endDate) {
   const url = `${ARCHIVE_URL}?latitude=${loc.lat}&longitude=${loc.lon}` +
     `&elevation=${loc.elevation_ft ? Math.round(loc.elevation_ft * 0.3048) : ''}` +
     `&start_date=${startDate}&end_date=${endDate}` +
-    `&daily=snowfall_sum&snowfall_unit=inch&timezone=auto`;
+    `&daily=snowfall_sum&precipitation_unit=inch&timezone=auto`;
   const data = await fetchJson(url);
   const out = {};
   for (let i = 0; i < data.daily.time.length; i++) {
