@@ -733,7 +733,10 @@ function ForecastChart({ data, hasRain, hasSnow, context }) {
             )
           ))}
           {/* Snow bars — same probability shades as rain; the black outline is
-              what marks "snow" (replaces the old solid #666 fill) */}
+              what marks "snow" (replaces the old solid #666 fill). The fill and
+              outline are separate elements so the outline can be an OPEN path
+              (left, top, right only) — a stroked <rect> would also dot the
+              bottom edge, leaving a noisy dotted artifact along the x-axis. */}
           {snowBars.map((bar, i) => (
             bar.h > 0 && (
               <rect
@@ -743,6 +746,16 @@ function ForecastChart({ data, hasRain, hasSnow, context }) {
                 width={bar.w}
                 height={bar.h}
                 fill={bar.fill}
+                shapeRendering="crispEdges"
+              />
+            )
+          ))}
+          {snowBars.map((bar, i) => (
+            bar.h > 0 && (
+              <path
+                key={`so${i}`}
+                d={`M ${bar.x} ${bar.y + bar.h} L ${bar.x} ${bar.y} L ${bar.x + bar.w} ${bar.y} L ${bar.x + bar.w} ${bar.y + bar.h}`}
+                fill="none"
                 stroke="#000"
                 strokeWidth={2}
                 strokeDasharray="3 3"

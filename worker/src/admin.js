@@ -53,14 +53,23 @@ export function adminPageHtml() {
   <h2>Add Location</h2>
   <form id="add-form">
     <div class="row">
-      <input id="add-zip" placeholder="Zip code" required>
-      <input id="add-label" placeholder="Label (e.g. Manhattan)">
+      <select id="add-type">
+        <option value="weather">Weather display (OpenWeatherMap)</option>
+        <option value="snow">Snow report (Open-Meteo, daily)</option>
+      </select>
+    </div>
+    <div class="row">
+      <input id="add-zip" placeholder="Device ID (5 digits, e.g. a zip)" required>
+      <input id="add-label" placeholder="Label (e.g. Manhattan / Breckenridge)">
     </div>
     <div class="row">
       <input id="add-lat" placeholder="Latitude" required>
       <input id="add-lon" placeholder="Longitude" required>
     </div>
-    <label class="checkbox-label"><input type="checkbox" id="add-dewpoint"> Show dew point (replaces the large UV display)</label>
+    <div class="row" id="add-elevation-row" style="display:none">
+      <input id="add-elevation" placeholder="Elevation (feet, e.g. 9959)">
+    </div>
+    <label class="checkbox-label" id="add-dewpoint-label"><input type="checkbox" id="add-dewpoint"> Show dew point (replaces the large UV display)</label>
     <button type="submit" class="btn-add">Add Location</button>
     <div id="add-error" class="error"></div>
   </form>
@@ -102,21 +111,24 @@ export function adminPageHtml() {
         el.innerHTML = '<span class="empty">No locations configured. Add one below.</span>';
         return;
       }
-      el.innerHTML = state.locations.map(loc => \`
+      el.innerHTML = state.locations.map(loc => {
+        const isSnow = loc.type === 'snow';
+        return \`
         <div class="card">
-          <div class="label">\${loc.label} (\${loc.zip})</div>
-          <div class="detail">\${loc.lat}, \${loc.lon}</div>
+          <div class="label">\${loc.label} (\${loc.zip})\${isSnow ? ' — ❄ snow report' : ''}</div>
+          <div class="detail">\${loc.lat}, \${loc.lon}\${isSnow && loc.elevation_ft ? ' · ' + loc.elevation_ft + ' ft' : ''}</div>
           <div class="detail">
             <a class="preview-link" href="/weather/\${loc.zip}.png" target="_blank">Preview PNG</a>
           </div>
-          <div class="actions">
+          \${isSnow ? '' : \`<div class="actions">
             <label class="checkbox-label"><input type="checkbox" \${loc.showDewPoint ? 'checked' : ''} onchange="setDewPoint('\${loc.zip}', this.checked)"> Show dew point</label>
-          </div>
+          </div>\`}
           <div class="actions">
             <button class="btn-remove" onclick="removeLocation('\${loc.zip}')">Remove</button>
           </div>
         </div>
-      \`).join('');
+      \`;
+      }).join('');
     }
 
     function renderPollInterval() {
@@ -130,9 +142,12 @@ export function adminPageHtml() {
       if (n === 0) { el.style.display = 'none'; return; }
 
       el.style.display = 'block';
+      // Snow locations poll Open-Meteo once a day (separate, free quota) and
+      // don't count against OWM.
+      const weatherN = state.locations.filter(l => l.type !== 'snow').length;
       const fetchesPerDay = Math.ceil(24 * 60 / interval);
-      const owmCalls = n * fetchesPerDay;
-      const kvWrites = n * fetchesPerDay; // render_updated every cycle, plus occasional render_png + render_hash
+      const owmCalls = weatherN * fetchesPerDay;
+      const kvWrites = weatherN * fetchesPerDay; // render_updated every cycle, plus occasional render_png + render_hash
       const owmPct = Math.round(owmCalls / 1000 * 100);
       const kvPct = Math.round(kvWrites / 1000 * 100);
 
@@ -141,7 +156,8 @@ export function adminPageHtml() {
 
       el.innerHTML = \`
         <div class="line"><strong>Estimated daily usage</strong></div>
-        <div class="line">\${n} location(s) × \${fetchesPerDay} fetches/day = <span class="\${owmClass}">\${owmCalls} OWM API calls</span> (of 1,000 free/day)</div>
+        <div class="line">\${weatherN} weather location(s) × \${fetchesPerDay} fetches/day = <span class="\${owmClass}">\${owmCalls} OWM API calls</span> (of 1,000 free/day)</div>
+        \${n > weatherN ? '<div class="line">' + (n - weatherN) + ' snow location(s): ~2 Open-Meteo calls/day each (free, separate quota)</div>' : ''}
         <div class="line">~<span class="\${kvClass}">\${kvWrites} KV writes</span> (of 1,000 free / 1M paid per day)</div>
         \${owmPct > 80 ? '<div class="line warn">⚠ Approaching OWM free tier limit. Consider increasing the polling interval.</div>' : ''}
       \`;
@@ -173,18 +189,28 @@ export function adminPageHtml() {
       }
     }
 
+    // Snow locations need elevation; dew point only applies to weather.
+    document.getElementById('add-type').addEventListener('change', (e) => {
+      const isSnow = e.target.value === 'snow';
+      document.getElementById('add-elevation-row').style.display = isSnow ? 'flex' : 'none';
+      document.getElementById('add-dewpoint-label').style.display = isSnow ? 'none' : 'flex';
+    });
+
     document.getElementById('add-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const errEl = document.getElementById('add-error');
       errEl.textContent = '';
 
+      const type = document.getElementById('add-type').value;
       const result = await post({
         action: 'add_location',
+        type,
         zip: document.getElementById('add-zip').value.trim(),
         lat: document.getElementById('add-lat').value.trim(),
         lon: document.getElementById('add-lon').value.trim(),
         label: document.getElementById('add-label').value.trim(),
-        showDewPoint: document.getElementById('add-dewpoint').checked,
+        showDewPoint: type === 'snow' ? false : document.getElementById('add-dewpoint').checked,
+        elevation_ft: document.getElementById('add-elevation').value.trim(),
       });
 
       if (result.error) {

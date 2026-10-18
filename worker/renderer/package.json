@@ -13,6 +13,7 @@
     "preview:menu": "tsx src/preview-menu.jsx",
     "preview:setup": "tsx src/preview-setup.jsx",
     "preview:icons": "tsx src/preview-icons.jsx",
+    "preview:snowreport": "tsx src/preview-snowreport.jsx",
     "preview:weather-icons": "tsx src/preview-weather-icons.jsx",
     "preview:all": "tsx src/preview-all.js",
     "tune:icons": "tsx src/icon-tuner.js"

@@ -31,6 +31,7 @@ import firaSansBold from '../renderer/fonts/FiraSans-Bold.ttf';
 import weatherIconsFont from '../renderer/node_modules/weathericons/font/weathericons-regular-webfont.ttf';
 
 import { WeatherFrame } from '../renderer/src/layout.jsx';
+import { SnowFrame } from '../renderer/src/snow-layout.jsx';
 // Bundled status-message CSV (wrangler "Text" module rule imports it as a
 // string). See renderer/messages.csv and status.js / messageStatus.
 import messagesCsv from '../renderer/messages.csv';
@@ -182,9 +183,11 @@ async function rgbaToGrayscalePng(width, height, pixels) {
 // ─── public API ──────────────────────────────────────────────────────────────
 
 /**
- * Render a weather frame to a grayscale PNG (Uint8Array).
+ * Render a display frame to a grayscale PNG (Uint8Array). The frame is picked
+ * by the data's `type`: 'snow' renders the snow-report layout, anything else
+ * the weather layout (whose data carries no type field).
  *
- * @param {object} data - Normalized WeatherData (same shape as /weather.json).
+ * @param {object} data - Normalized WeatherData, or snow-report data.
  * @param {object} [options] - { location } — the zip, used by the message status.
  * @returns {Promise<Uint8Array>} 960×540 8bpp grayscale PNG bytes.
  */
@@ -193,8 +196,12 @@ export async function renderWeatherPng(data, options = {}) {
 
   const context = { location: options.location, messages: messagesCsv };
 
+  const frame = data.type === 'snow'
+    ? <SnowFrame data={data} />
+    : <WeatherFrame data={data} context={context} />;
+
   // JSX → SVG
-  const svg = await satori(<WeatherFrame data={data} context={context} />, {
+  const svg = await satori(frame, {
     width: WIDTH,
     height: HEIGHT,
     fonts,
